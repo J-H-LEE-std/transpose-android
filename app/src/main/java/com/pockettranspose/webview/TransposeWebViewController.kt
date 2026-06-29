@@ -53,10 +53,10 @@ class TransposeWebViewController(
     }
 
     private fun injectFallback(target: WebView) {
-        evaluate("(function(){ $script })();", null, target)
+        evaluate("(function(){ $script })();", target)
     }
 
-    private fun evaluate(source: String, callback: ((String) -> Unit)? = null, target: WebView = webView) {
+    private fun evaluate(source: String, target: WebView = webView, callback: ((String) -> Unit)? = null) {
         target.post { target.evaluateJavascript(source, callback) }
     }
 

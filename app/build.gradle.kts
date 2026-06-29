@@ -14,6 +14,14 @@ android {
         versionCode = 1
         versionName = "0.1.0"
     }
+
+    buildFeatures {
+        buildConfig = true
+    }
+}
+
+kotlin {
+    jvmToolchain(21)
 }
 
 dependencies {
