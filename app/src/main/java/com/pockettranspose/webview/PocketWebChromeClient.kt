@@ -12,10 +12,16 @@ class PocketWebChromeClient(private val activity: Activity) : WebChromeClient() 
     private var fullscreenCallback: CustomViewCallback? = null
 
     override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
-        Log.d(
-            "PocketTransposeJS",
-            "${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})"
-        )
+        if (com.pockettranspose.BuildConfig.DEBUG && consoleMessage.message().startsWith("[PocketTranspose]")) {
+            // Only our structured diagnostics; no page logs, source IDs, or URLs.
+            Log.d("PocketTransposeJS", consoleMessage.message())
+        }
+        return true
+    }
+
+    fun exitFullscreen(): Boolean {
+        if (fullscreenView == null) return false
+        onHideCustomView()
         return true
     }
 
@@ -39,6 +45,7 @@ class PocketWebChromeClient(private val activity: Activity) : WebChromeClient() 
         val view = fullscreenView ?: return
         (view.parent as? ViewGroup)?.removeView(view)
         fullscreenView = null
+        activity.window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
         fullscreenCallback?.onCustomViewHidden()
         fullscreenCallback = null
     }
