@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PocketTranspose HTML5 media test</title>
+  <style>
+    body { font-family: sans-serif; margin: 16px; line-height: 1.4; }
+    video, audio { width: 100%; margin: 8px 0; }
+    input[type=url] { width: 100%; box-sizing: border-box; padding: 8px; }
+    button { padding: 8px 12px; margin: 4px 4px 4px 0; }
+    .hint { color: #555; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <h2>HTML5 media test (Test 1)</h2>
+  <p class="hint">
+    Served from <code>https://appassets.androidplatform.net</code> so it is a secure, same-origin context.
+    Use this page to check <code>media found</code>, <code>media element source connected</code>,
+    gain, speed and pitch before trying YouTube.
+  </p>
+
+  <h3>1. Generated tone (always same-origin)</h3>
+  <p class="hint">A repeating C-E-G-C arpeggio rendered to a WAV blob in this page. Pitch changes are easy to hear.</p>
+  <button id="tone">Create tone player</button>
+
+  <h3>2. Your own media URL</h3>
+  <p class="hint">
+    Cross-origin media is only audible through Web Audio when the server sends CORS headers and
+    <code>crossorigin</code> is set. Without CORS the hook connects but outputs silence.
+  </p>
+  <input id="url" type="url" placeholder="https://example.com/sample.mp4">
+  <label><input id="cors" type="checkbox" checked> crossorigin="anonymous"</label><br>
+  <button id="load">Load as video</button>
+
+  <div id="player"></div>
+
+  <script>
+    (() => {
+      const player = document.getElementById('player');
+
+      function writeString(view, offset, text) {
+        for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+      }
+
+      function toneWavBlob() {
+        const sampleRate = 44100;
+        const notes = [261.63, 329.63, 392.0, 523.25];
+        const noteSeconds = 0.5;
+        const total = Math.round(sampleRate * noteSeconds * notes.length);
+        const view = new DataView(new ArrayBuffer(44 + total * 2));
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + total * 2, true);
+        writeString(view, 8, 'WAVE');
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        writeString(view, 36, 'data');
+        view.setUint32(40, total * 2, true);
+        const perNote = total / notes.length;
+        for (let i = 0; i < total; i++) {
+          const n = Math.floor(i / perNote);
+          const t = (i % perNote) / sampleRate;
+          const env = Math.min(1, t * 50) * Math.exp(-t * 3);
+          const v = 0.4 * env * (Math.sin(2 * Math.PI * notes[n] * t) + 0.3 * Math.sin(4 * Math.PI * notes[n] * t));
+          view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v)) * 32767, true);
+        }
+        return new Blob([view.buffer], { type: 'audio/wav' });
+      }
+
+      function show(element) {
+        player.replaceChildren(element);
+        element.controls = true;
+        element.play().catch((e) => console.log('[PocketTranspose] test page autoplay blocked', e.name));
+      }
+
+      document.getElementById('tone').addEventListener('click', () => {
+        const audio = document.createElement('audio');
+        audio.loop = true;
+        audio.src = URL.createObjectURL(toneWavBlob());
+        show(audio);
+      });
+
+      document.getElementById('load').addEventListener('click', () => {
+        const url = document.getElementById('url').value.trim();
+        if (!url) return;
+        const video = document.createElement('video');
+        video.playsInline = true;
+        if (document.getElementById('cors').checked) video.crossOrigin = 'anonymous';
+        video.src = url;
+        show(video);
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -27,3 +27,6 @@ kotlin {
 dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
 }
+
+// Fails preBuild/check when a runtime dependency has a forbidden or unknown license.
+apply(from = rootProject.file("gradle/license-check.gradle.kts"))
