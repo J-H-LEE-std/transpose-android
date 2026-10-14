@@ -72,6 +72,16 @@ adb logcat -s PocketTransposeJS
 
 Remote debugging of the page (debug builds only): `chrome://inspect` on a desktop Chrome.
 
+## Automated checks (CI)
+
+`.github/workflows/android.yml` runs on every pull request, on pushes to `main`, and on demand:
+
+1. `node --test tests/*.test.cjs`: regression tests for the injected scripts (Node built-ins only, with fake DOM/Web Audio objects). They cover install/re-injection, one `MediaElementSource` per element, setting clamps and carry-over to new media, the native-node pitch engine (±12 clamp, sweep rate, curve shapes), URL redaction in logs/status, SPA rescans, silence detection, and the probe.
+2. `./gradlew :app:assembleDebug :app:lintDebug`: build, license gate (`checkThirdPartyLicenses`) and lint.
+3. Uploads `app-debug.apk`, the license report and the lint report as the `PocketTranspose-debug` artifact.
+
+Run the same locally with `node --test tests/*.test.cjs` and `./gradlew :app:assembleDebug :app:lintDebug`.
+
 ## Manual test procedure
 
 ### Test 1 – general HTML5 media (do this first)
@@ -118,7 +128,7 @@ Results below are from the cloud build environment. The debug APK builds, but **
 | 0 | Native-node pitch shifter, `OfflineAudioContext` in Chromium (440 Hz sine) | Peak = 440·2^(n/12); no clicks | **Pass** – −12: 220, −2: 392, −1: 415.5, +1: 466, +2: 494, +7: 659.5, +12: 880 Hz; RMS unchanged; largest sample-to-sample step equals that of a pure sine (no discontinuities) | – |
 | 0 | Pitch engine on live m.youtube.com (Chromium, mobile emulation) | Engine starts under YouTube's CSP | **Pass** – `pitchEngine: native-nodes`. (AudioWorklet via blob:, data: and same-origin URLs all fail there: `AbortError`) | – |
 | 0 | `./gradlew :app:assembleDebug` (AGP 8.13.2, compileSdk 35, JDK 21) | APK builds; license gate passes | **Pass** – `app-debug.apk` built; all 12 runtime modules Apache-2.0; no Kotlin compiler warnings | – |
-| 0 | `./gradlew :app:lintDebug` | No lint errors | **Pass** – 0 errors; remaining warnings are version-bump suggestions (compileSdk 36, webkit 1.17.1, Gradle 8.14.6), `allowBackup` deprecation, and hard-coded UI strings | – |
+| 0 | `./gradlew :app:lintDebug` | No lint errors | **Pass** – 0 errors; remaining warnings are version-bump suggestions (compileSdk 36, webkit 1.17.1, Gradle 8.14.6), the `-v26` mipmap folder (required for adaptive icons), and hard-coded UI strings | – |
 | 1 | General HTML5 media page (Test page) | `media found`, `media element source connected`, gain, speed, pitch audible | Not yet tested on device | Check `lastError` / `pitchError` in Status |
 | 2 | YouTube mobile page | Video found and Web Audio connection success, or a clear exception log | Not yet tested on device | Record CORS/silence/element-replacement behaviour; compare with Probe only |
 | 3 | YouTube video transition | New-route logs and media re-hook after selecting another video | Not yet tested on device | Strengthen SPA detection / rescan cadence |
@@ -152,8 +162,8 @@ The first version ran the shifter in an `AudioWorkletNode` (module from a Blob U
 ## Security and privacy
 
 - Injected JS runs only in this app's WebView; no `addJavascriptInterface()`.
-- WebView debugging only in debug builds; `allowBackup=false`; file/content access disabled; mixed content stays at the platform default.
-- Logs never contain full URLs (only the media source scheme, e.g. `blob:`), cookies, or account data. Status JSON has no URL.
+- WebView debugging only in debug builds; `allowBackup=false` plus `data_extraction_rules.xml` / `backup_rules.xml` keep cookies and site data out of cloud backup and device transfer; file/content access disabled; mixed content stays at the platform default.
+- Logs never contain full URLs (only the media source scheme, e.g. `blob:`; URLs inside exception messages are replaced with `<url>`), cookies, or account data. Status JSON has no URL.
 
 ## License policy status
 
