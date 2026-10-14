@@ -1,7 +1,7 @@
 # Third-party notices
 
 This PoC intentionally avoids third-party DSP, pitch-shifting, npm, WebAssembly, and prebuilt binary dependencies.
-The pitch shifter in `app/src/main/assets/pocket_transpose_hook.js` (`definePitchShifter`) was written from scratch for this project; no external DSP/FFT code was copied.
+The pitch shifter in `app/src/main/assets/pocket_transpose_hook.js` (`createNativePitchShifter`, built from standard Web Audio nodes) was written from scratch for this project; no external DSP/FFT code was copied.
 
 ## Direct dependencies
 

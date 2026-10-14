@@ -7,7 +7,8 @@ The primary question this PoC answers: **does `AudioContext.createMediaElementSo
 ## Architecture
 
 ```
-MainActivity (URL bar, WebView, control panel, fullscreen container)
+MainActivity (URL bar, WebView, edge-to-edge insets, fullscreen container)
+ ├─ ControlSheet                   swipe-up bottom sheet: pitch/speed/gain steppers, toggles, actions
  └─ TransposeWebViewController     WebView settings, script injection, Native -> JS via evaluateJavascript()
      ├─ PocketWebChromeClient      console -> Logcat (tag PocketTransposeJS), fullscreen, onProgressChanged
      ├─ PocketWebViewClient        onPageFinished fallback injection, SPA URL updates, WebViewAssetLoader
@@ -23,6 +24,11 @@ Web Audio graph built by the hook:
 ```
 <video>/<audio> -> MediaElementSource -> inputBus -> [pitch shifter, only when pitch != 0] -> GainNode -> destination
                                             \-> AnalyserNode (signal level / silence detection)
+
+pitch shifter (native nodes only):
+  looping 4-ch AudioBufferSource (ramp A, window A, ramp B, window B) -> ChannelSplitter
+    ramp  -> GainNode(×50 ms) -> DelayNode.delayTime      (tap A / tap B)
+    window -> GainNode.gain   (sin² crossfade, A + B = 1)
 ```
 
 ## Implemented scope
@@ -34,8 +40,8 @@ Web Audio graph built by the hook:
 | Phase 1 / Task 3 – injection | `WebViewFeature.isFeatureSupported(DOCUMENT_START_SCRIPT)` -> `WebViewCompat.addDocumentStartJavaScript()`; fallback `onPageFinished()` / `onProgressChanged(100)` + `evaluateJavascript()`; scripts loaded from `assets/` |
 | Task 4 – media discovery | `querySelectorAll("video, audio")` (prefers the playing element), coalesced `MutationObserver`, 1 s interval scan |
 | Phase 2 / Task 5 – Web Audio | `AudioContext` (`latencyHint: "playback"`), `createMediaElementSource()`, `GainNode`, success/failure logs with exception name + message; resume on play / touch / visibility / app resume |
-| Phase 3 / Task 6 – native UI | Gain (0–2.00), Speed (0.25–3.00x), Pitch (−12…+12 semitones), "Preserve pitch" (`preservesPitch`), YouTube / Test page / Reinject / Status buttons, status JSON shown on screen and in Logcat |
-| Phase 4 / Task 8 – pitch shift | Self-written two-tap delay-line pitch shifter (no third-party code). Runs as an `AudioWorkletNode` (module loaded from a Blob URL); falls back to `ScriptProcessorNode`; bypassed entirely at 0 semitones |
+| Phase 3 / Task 6 – native UI | Bottom sheet: swipe the handle up (or tap) to open, down to close; back closes it. Pitch (−12…+12 st, step 1), Speed (0.25–3.00x, step 0.05), Gain (0–2.00, step 0.05), each with −/+ buttons and a slider (long-press the value to reset); "Preserve pitch", Probe only, Reset, Status, YouTube / Test page / Reinject; status JSON shown in the sheet and Logcat. The app pads its layout by the system-bar insets (targetSdk 35 is edge-to-edge on Android 15), and only video fullscreen hides the bars |
+| Phase 4 / Task 8 – pitch shift | Self-written two-tap delay-line pitch shifter built **only from native Web Audio nodes** (`DelayNode` + looping curve `AudioBufferSourceNode` + `GainNode`), so it runs on the audio rendering thread. Bypassed at 0 semitones. See "Why not AudioWorklet" below |
 | Phase 5 / Task 7 – YouTube SPA | `history.pushState`/`replaceState` patch, `popstate`, `yt-navigate-finish`, URL-change detection in the scan loop, re-hook of replaced media elements; settings re-applied after full reloads |
 | Diagnostics | "Probe only" checkbox switches to the Phase 1 probe (reloads the page) so hook vs. no-hook behaviour can be compared; AnalyserNode-based warning `media is playing but Web Audio input is silent (possible CORS/MSE silence)` |
 | §15 license policy | No third-party DSP/npm/WASM/binaries. `checkThirdPartyLicenses` Gradle task fails `preBuild`/`check` on forbidden or unknown licenses — see `THIRD_PARTY_NOTICES.md` |
@@ -71,12 +77,13 @@ Remote debugging of the page (debug builds only): `chrome://inspect` on a deskto
 ### Test 1 – general HTML5 media (do this first)
 
 1. Launch the app, tap **Test page**.
-2. Tap **Create tone player** (a same-origin generated arpeggio). Expect in Logcat:
+2. Swipe up the **Transpose** handle at the bottom to open the controls.
+3. Tap **Create tone player** (a same-origin generated arpeggio). Expect in Logcat:
    `script installed` → `media found AUDIO blob:` → `AudioContext created` → `media element source connected`.
-3. Move **Gain** and **Speed**; toggle **Preserve pitch** while speed ≠ 1.00x.
-4. Move **Pitch** to +1, −1, +2, −2: the arpeggio should transpose without changing tempo. Expect `pitch engine ready audioworklet` (or `scriptprocessor`).
-5. Tap **Status**: `connected: true`, `audioContextState: "running"`, `inputLevelDb` well above −90.
-6. Optional: paste a CORS-enabled media URL in section 2 of the test page.
+4. Move **Gain** and **Speed** (slider or −/+); toggle **Preserve pitch** while speed ≠ 1.00x.
+5. Tap Pitch −/+ to reach +1, −1, +2, −2: the arpeggio should transpose without changing tempo or crackling. Expect `pitch engine ready native-nodes`.
+6. Tap **Status**: `connected: true`, `audioContextState: "running"`, `inputLevelDb` well above −90.
+7. Optional: paste a CORS-enabled media URL in section 2 of the test page.
 
 ### Test 2 – YouTube mobile
 
@@ -107,8 +114,9 @@ Results below are from the cloud build environment. The debug APK builds, but **
 
 | # | Scenario | Success criteria | Observed result | Next action on failure |
 | --- | --- | --- | --- | --- |
-| 0 | Hook script in desktop headless Chromium (Playwright, local test page) | `script installed`, `media found`, `media element source connected`, gain/speed applied, AudioWorklet pitch engine, signal detected, SPA re-hook | **Pass** – all logs present, `inputLevelDb` ≈ −22 dBFS, `pitchEngine: audioworklet`; with AudioWorklet removed it falls back to `scriptprocessor`; `pushState` + element swap re-hooked (`hookedCount: 2`) | – |
-| 0 | Pitch DSP offline test (Node, 440 Hz sine) | Peak frequency = 440·2^(n/12) | **Pass** – −12: 220 Hz, −2: 392, −1: 415.5, +1: 466, +2: 494, +12: 880 Hz; level unchanged | – |
+| 0 | Hook script in desktop headless Chromium (Playwright, local test page) | `script installed`, `media found`, `media element source connected`, gain/speed/pitch applied, signal detected, SPA re-hook | **Pass** – all logs present, `inputLevelDb` ≈ −22 dBFS, `pitchEngine: native-nodes`; `pushState` + element swap re-hooked (`hookedCount: 2`) | – |
+| 0 | Native-node pitch shifter, `OfflineAudioContext` in Chromium (440 Hz sine) | Peak = 440·2^(n/12); no clicks | **Pass** – −12: 220, −2: 392, −1: 415.5, +1: 466, +2: 494, +7: 659.5, +12: 880 Hz; RMS unchanged; largest sample-to-sample step equals that of a pure sine (no discontinuities) | – |
+| 0 | Pitch engine on live m.youtube.com (Chromium, mobile emulation) | Engine starts under YouTube's CSP | **Pass** – `pitchEngine: native-nodes`. (AudioWorklet via blob:, data: and same-origin URLs all fail there: `AbortError`) | – |
 | 0 | `./gradlew :app:assembleDebug` (AGP 8.13.2, compileSdk 35, JDK 21) | APK builds; license gate passes | **Pass** – `app-debug.apk` built; all 12 runtime modules Apache-2.0; no Kotlin compiler warnings | – |
 | 0 | `./gradlew :app:lintDebug` | No lint errors | **Pass** – 0 errors; remaining warnings are version-bump suggestions (compileSdk 36, webkit 1.17.1, Gradle 8.14.6), missing app icon, `allowBackup` deprecation, and hard-coded UI strings | – |
 | 1 | General HTML5 media page (Test page) | `media found`, `media element source connected`, gain, speed, pitch audible | Not yet tested on device | Check `lastError` / `pitchError` in Status |
@@ -127,13 +135,17 @@ Results below are from the cloud build environment. The debug APK builds, but **
 | Sound output | Video sound audible | Re-examine graph; compare with **Probe only** |
 | Gain | Audible volume change | Check JS API call path (`gain set` log) |
 | Speed | Playback speed changes | Check `mediaPlaybackRate` in Status (YouTube may override it) |
-| Pitch | Audible pitch change | Check `pitchEngine` / `pitchError`; AudioWorklet may be blocked by page CSP → ScriptProcessor fallback |
+| Pitch | Audible pitch change, no crackle | Check `pitchEngine` / `pitchError` in Status; if it crackles, check whether it also crackles at Pitch 0 (bypass) |
 | YouTube transition | Re-scan on new video | Strengthen SPA event detection |
 
 ## Known limitations / risks
 
 - **YouTube CORS / MSE silence**: `createMediaElementSource()` may succeed while the output is silent. The analyser-based warning makes this visible, but it cannot be fixed from the page side (bypassing it is out of scope).
 - The pitch shifter is a simple time-domain design (≈50 ms window): fine for listening/practice, with some "chorus"-like artefacts on large shifts and ~25 ms of added latency. A higher-quality algorithm would need a permissively-licensed library or more DSP work (see license policy).
+
+### Why not AudioWorklet
+
+The first version ran the shifter in an `AudioWorkletNode` (module from a Blob URL) with a `ScriptProcessorNode` fallback. On YouTube this crackled: YouTube's CSP contains `script-src 'nonce-…' 'strict-dynamic'`, which blocks *every* worklet module URL (blob:, data:, and even same-origin), so the shifter fell back to `ScriptProcessorNode`, whose callback runs on YouTube's busy main thread and underruns. The native-node design needs no script on the audio path, so CSP does not apply and there is no main-thread dependency.
 - `mediaPlaybackRequiresUserGesture = false` is a PoC convenience; YouTube may still reset `playbackRate` on its own.
 - The WebView, its cookies and the injected script stay inside this app only; nothing is injected into other apps or browsers.
 
