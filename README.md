@@ -66,7 +66,7 @@ Requirements: Android SDK (compileSdk 35), JDK 21, access to Google Maven.
 
 ```bash
 ./gradlew :app:assembleDebug          # also runs checkThirdPartyLicenses
-./gradlew :app:installDebug
+./gradlew :app:installDebug           # installs com.pockettranspose.debug
 adb logcat -s PocketTransposeJS
 ```
 
@@ -81,6 +81,38 @@ Remote debugging of the page (debug builds only): `chrome://inspect` on a deskto
 3. Uploads `app-debug.apk`, the license report and the lint report as the `PocketTranspose-debug` artifact.
 
 Run the same locally with `node --test tests/*.test.cjs` and `./gradlew :app:assembleDebug :app:lintDebug`.
+
+## Releasing
+
+Releases are built and published by `.github/workflows/release.yml` when a tag `v<versionName>` is pushed (for example `v0.1.0`). The workflow:
+1. checks that the tag matches `versionName` in `app/build.gradle.kts`
+2. runs the JS tests
+3. builds a release APK signed with the keystore from repository secrets; `assembleRelease` also runs the license gate and `lintVitalRelease`
+4. verifies the signature
+5. creates the GitHub Release with the APK, its SHA-256 and the license report
+
+Release notes come from `docs/releases/<tag>.md`. Without signing secrets the workflow fails rather than publish an unsigned APK.
+
+One-time signing setup (keep the keystore and passwords safe: every future update must be signed with the same key):
+
+```bash
+keytool -genkeypair -v -keystore pockettranspose-release.jks -alias pockettranspose \
+  -keyalg RSA -keysize 4096 -validity 10000
+base64 -w0 pockettranspose-release.jks > keystore.b64   # macOS: base64 -i pockettranspose-release.jks
+```
+
+Then add these repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+| --- | --- |
+| `RELEASE_KEYSTORE_BASE64` | contents of `keystore.b64` |
+| `RELEASE_KEYSTORE_PASSWORD` | keystore password |
+| `RELEASE_KEY_ALIAS` | `pockettranspose` |
+| `RELEASE_KEY_PASSWORD` | key password (same as the keystore password unless you chose otherwise) |
+
+To release: bump `versionCode`/`versionName`, add `docs/releases/v<version>.md`, merge to `main`, then push the tag (`git tag v0.1.0 && git push origin v0.1.0`).
+
+Debug builds use the package `com.pockettranspose.debug` and the label "PocketTranspose (debug)", so they can be installed next to the release build.
 
 ## Manual test procedure
 
