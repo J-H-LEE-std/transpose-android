@@ -101,7 +101,7 @@ keytool -genkeypair -v -keystore pockettranspose-release.jks -alias pockettransp
 base64 -w0 pockettranspose-release.jks > keystore.b64   # macOS: base64 -i pockettranspose-release.jks
 ```
 
-Then add these repository secrets (Settings → Secrets and variables → Actions):
+Then create a `release` environment (Settings → Environments) with yourself as a required reviewer, allow the `v*` tags under "Deployment branches and tags", and add these as **environment secrets** of `release`. The workflow runs in that environment, so every release waits for your approval before the secrets reach the runner:
 
 | Secret | Value |
 | --- | --- |
