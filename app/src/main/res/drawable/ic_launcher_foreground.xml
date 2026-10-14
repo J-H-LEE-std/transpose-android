@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PocketTranspose launcher icon (original artwork): music notes dropping into a
+     jeans pocket whose stitching forms three mixer faders. 108dp adaptive canvas,
+     artwork scaled to 90% so it stays inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
+        <path android:fillColor="#FFFFFF" android:pathData="M47,23 L66,18 L66,24 L47,29 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M47,23 H50.2 V45 H47 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M62.809999999999995,18 H65.99 L66.0,18.01 V39.99 L65.99,40 H62.809999999999995 L62.8,39.99 V18.01 L62.809999999999995,18 Z" />
+        <group android:pivotX="43.6" android:pivotY="45" android:rotation="-20">
+            <path android:fillColor="#FFFFFF" android:pathData="M37.2,45 A6.4,4.6 0 1 0 50.0,45 A6.4,4.6 0 1 0 37.2,45 Z" />
+        </group>
+        <group android:pivotX="59.4" android:pivotY="40" android:rotation="-20">
+            <path android:fillColor="#FFFFFF" android:pathData="M53.0,40 A6.4,4.6 0 1 0 65.8,40 A6.4,4.6 0 1 0 53.0,40 Z" />
+        </group>
+        <path android:fillColor="#8AB4F8" android:pathData="M28,46 L80,46 L80,72 Q80,75 77.4,76.6 L55.6,86.4 Q54,87.2 52.4,86.4 L30.6,76.6 Q28,75 28,72 Z" />
+        <path android:fillColor="#5E8FE0" android:pathData="M28,46 L80,46 L80,52 L28,52 Z" />
+        <path android:fillColor="#1B2550" android:pathData="M41.7,56 H41.699999999999996 A1.2,1.2 0 0 1 42.9,57.2 V73.8 A1.2,1.2 0 0 1 41.699999999999996,75 H41.7 A1.2,1.2 0 0 1 40.5,73.8 V57.2 A1.2,1.2 0 0 1 41.7,56 Z" />
+        <path android:fillColor="#1B2550" android:pathData="M54.0,56 H53.99999999999999 A1.2,1.2 0 0 1 55.199999999999996,57.2 V78.8 A1.2,1.2 0 0 1 53.99999999999999,80 H54.0 A1.2,1.2 0 0 1 52.8,78.8 V57.2 A1.2,1.2 0 0 1 54.0,56 Z" />
+        <path android:fillColor="#1B2550" android:pathData="M66.3,56 H66.3 A1.2,1.2 0 0 1 67.5,57.2 V73.8 A1.2,1.2 0 0 1 66.3,75 H66.3 A1.2,1.2 0 0 1 65.1,73.8 V57.2 A1.2,1.2 0 0 1 66.3,56 Z" />
+        <path android:fillColor="#1B2550" android:pathData="M39.5,66 H43.9 A2.5,2.5 0 0 1 46.4,68.5 V68.5 A2.5,2.5 0 0 1 43.9,71 H39.5 A2.5,2.5 0 0 1 37,68.5 V68.5 A2.5,2.5 0 0 1 39.5,66 Z" />
+        <path android:fillColor="#1B2550" android:pathData="M51.8,59 H56.199999999999996 A2.5,2.5 0 0 1 58.699999999999996,61.5 V61.5 A2.5,2.5 0 0 1 56.199999999999996,64 H51.8 A2.5,2.5 0 0 1 49.3,61.5 V61.5 A2.5,2.5 0 0 1 51.8,59 Z" />
+        <path android:fillColor="#1B2550" android:pathData="M64.1,63 H68.5 A2.5,2.5 0 0 1 71.0,65.5 V65.5 A2.5,2.5 0 0 1 68.5,68 H64.1 A2.5,2.5 0 0 1 61.6,65.5 V65.5 A2.5,2.5 0 0 1 64.1,63 Z" />
+    </group>
+</vector>

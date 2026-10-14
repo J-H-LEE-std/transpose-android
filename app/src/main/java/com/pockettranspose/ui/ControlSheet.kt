@@ -222,8 +222,9 @@ class ControlSheet(context: Context, private val actions: Actions) : LinearLayou
     /** One setting: label + value on top, [−] slider [+] below. Long-press the value to reset. */
     private inner class StepperRow(
         label: String,
-        private val min: Int,
-        max: Int,
+        // Not named min/max: inside SeekBar.apply {} those would resolve to SeekBar.min/max.
+        private val minValue: Int,
+        private val maxValue: Int,
         private val step: Int,
         private val default: Int,
         private val format: (Int) -> String,
@@ -231,13 +232,13 @@ class ControlSheet(context: Context, private val actions: Actions) : LinearLayou
     ) {
         private val valueText = text(format(default), 18f, ACCENT).apply { setTypeface(typeface, Typeface.BOLD) }
         private val seekBar = SeekBar(context).apply {
-            this.max = max - min
-            progress = default - min
+            max = maxValue - minValue
+            progress = default - minValue
             progressTintList = ColorStateList.valueOf(ACCENT)
             thumbTintList = ColorStateList.valueOf(ACCENT)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    val value = progress + min
+                    val value = progress + minValue
                     valueText.text = format(value)
                     onChanged(value)
                     updateSummary()
@@ -272,13 +273,13 @@ class ControlSheet(context: Context, private val actions: Actions) : LinearLayou
 
         private fun nudge(delta: Int) {
             // Snap to the step grid so repeated taps land on round values.
-            val current = seekBar.progress + min
+            val current = seekBar.progress + minValue
             val snapped = ((current + delta).toFloat() / step).roundToInt() * step
-            seekBar.progress = snapped - min
+            seekBar.progress = snapped.coerceIn(minValue, maxValue) - minValue
         }
 
         fun reset() {
-            seekBar.progress = default - min
+            seekBar.progress = default - minValue
         }
     }
 
