@@ -1,7 +1,5 @@
 # PocketTranspose 코드 리뷰 보고서
 
-> 과거 PoC 상태에 대한 기록입니다. 현재 구현 및 검증 결과는 README.md를 참조하세요. 아래의 미해결 항목은 현재 상태를 뜻하지 않습니다.
-
 ## 리뷰 범위
 
 - Android Kotlin WebView PoC 전체 구조

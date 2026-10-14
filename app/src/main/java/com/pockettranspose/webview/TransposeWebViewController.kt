@@ -2,76 +2,184 @@ package com.pockettranspose.webview
 
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.AlertDialog
+import android.util.Log
+import android.view.ViewGroup
 import android.webkit.WebView
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.pockettranspose.BuildConfig
 import com.pockettranspose.script.InjectedScriptProvider
-import org.json.JSONTokener
+import com.pockettranspose.script.InjectionMode
+import org.json.JSONArray
 
+/**
+ * Owns WebView configuration, script injection and every Native -> JS call.
+ *
+ * Native -> JS goes exclusively through evaluateJavascript(); no addJavascriptInterface()
+ * bridge is exposed to web content.
+ */
 class TransposeWebViewController(
     private val activity: Activity,
     private val webView: WebView,
-    private val scriptProvider: InjectedScriptProvider
+    private val scriptProvider: InjectedScriptProvider,
+    fullscreenContainer: ViewGroup,
+    private val listener: Listener
 ) {
-    private val script: String by lazy { scriptProvider.pocketTransposeHook() }
-    private val chrome = PocketWebChromeClient(activity)
-    private var gain = 1f
-    private var rate = 1f
-    private var preservesPitch = true
+    interface Listener {
+        fun onUrlChanged(url: String?)
+        fun onFullscreenChanged(fullscreen: Boolean)
+        fun onStatus(statusJson: String)
+    }
+
+    data class AudioSettings(
+        val gain: Float = 1f,
+        val playbackRate: Float = 1f,
+        val pitchSemitone: Int = 0,
+        val preservesPitch: Boolean = true
+    )
+
+    var mode: InjectionMode = InjectionMode.HOOK
+        private set
+    var settings = AudioSettings()
+        private set
+    var documentStartSupported = false
+        private set
+
+    private var documentStartHandler: ScriptHandler? = null
+
+    private val chromeClient = PocketWebChromeClient(
+        fullscreenContainer,
+        onFullscreenChanged = { listener.onFullscreenChanged(it) },
+        onLoadComplete = { injectFallback(it) }
+    )
+
+    val isFullscreen: Boolean get() = chromeClient.isFullscreen
 
     @SuppressLint("SetJavaScriptEnabled")
     fun configure() {
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            mediaPlaybackRequiresUserGesture = true
-            allowFileAccess = false
-            allowContentAccess = false
-            setSupportMultipleWindows(false)
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        // PoC convenience: lets media and AudioContext start without a tap. Review before release.
+        webView.settings.mediaPlaybackRequiresUserGesture = false
+        // Mixed content keeps the platform default (blocked); file access stays disabled.
+        webView.settings.allowFileAccess = false
+        webView.settings.allowContentAccess = false
+        if (BuildConfig.DEBUG) {
+            // Debug only: exposes the WebView to chrome://inspect.
+            WebView.setWebContentsDebuggingEnabled(true)
         }
-        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
-        webView.webChromeClient = chrome
-        webView.webViewClient = PocketWebViewClient { reinject() }
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("https://*"))
-        }
+        val assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(activity))
+            .build()
+        webView.webChromeClient = chromeClient
+        webView.webViewClient = PocketWebViewClient(
+            assetLoader,
+            onPageFinished = {
+                injectFallback(it)
+                pushSettings()
+            },
+            onUrlChanged = { listener.onUrlChanged(it) }
+        )
+        installDocumentStartScript()
     }
-    fun loadDefault() = webView.loadUrl("https://m.youtube.com")
-    fun loadUrl(url: String): Boolean {
-        val uri = android.net.Uri.parse(url.trim())
-        if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null) return false
-        webView.loadUrl(uri.toString())
-        return true
+
+    fun loadUrl(input: String) {
+        val trimmed = input.trim()
+        if (trimmed.isEmpty()) return
+        val url = if (trimmed.contains("://")) trimmed else "https://$trimmed"
+        webView.loadUrl(url)
     }
-    fun loadTest() = webView.loadDataWithBaseURL(
-        "https://appassets.androidplatform.net/",
-        activity.assets.open("test_media.html").bufferedReader().use { it.readText() },
-        "text/html", "UTF-8", null
-    )
-    fun exitFullscreen() = chrome.exitFullscreen()
-    fun destroy() { chrome.exitFullscreen() }
-    fun reinject() = evaluate(script) { applySettings() }
-    fun resume() = evaluate("window.PocketTranspose && window.PocketTranspose.resume();")
-    fun setGain(value: Float) { gain = value.coerceIn(0f, 2f); applySettings() }
-    fun setPlaybackRate(value: Float) { rate = value.coerceIn(0.25f, 2f); applySettings() }
-    fun setPreservesPitch(value: Boolean) { preservesPitch = value; applySettings() }
-    private fun applySettings() = evaluate("""
-        if(window.PocketTranspose) {
-          window.PocketTranspose.setGain($gain);
-          window.PocketTranspose.setPlaybackRate($rate);
-          window.PocketTranspose.setPreservesPitch($preservesPitch);
-        }
-    """.trimIndent())
+
+    fun loadYouTube() = webView.loadUrl(YOUTUBE_URL)
+
+    fun loadTestPage() = webView.loadUrl(TEST_PAGE_URL)
+
+    /** Switches between the probe and hook scripts; takes effect after a reload. */
+    fun setMode(newMode: InjectionMode) {
+        if (newMode == mode) return
+        mode = newMode
+        Log.d(LOG_TAG, "injection mode -> $newMode")
+        installDocumentStartScript()
+        webView.reload()
+    }
+
+    /** Injects the script if missing; if it is already installed, the script just rescans. */
+    fun reinject() {
+        injectFallback(webView)
+        pushSettings()
+    }
+
+    fun onHostResumed() = evaluate("window.PocketTranspose && window.PocketTranspose.resume();")
+
+    fun exitFullscreen() = chromeClient.exitFullscreen()
+
+    fun setGain(value: Float) {
+        settings = settings.copy(gain = value)
+        evaluate("window.PocketTranspose && window.PocketTranspose.setGain($value);")
+    }
+
+    fun setPlaybackRate(value: Float) {
+        settings = settings.copy(playbackRate = value)
+        evaluate("window.PocketTranspose && window.PocketTranspose.setPlaybackRate($value);")
+    }
+
+    fun setPitchSemitone(value: Int) {
+        settings = settings.copy(pitchSemitone = value)
+        evaluate("window.PocketTranspose && window.PocketTranspose.setPitchSemitone($value);")
+    }
+
+    fun setPreservesPitch(value: Boolean) {
+        settings = settings.copy(preservesPitch = value)
+        evaluate("window.PocketTranspose && window.PocketTranspose.setPreservesPitch($value);")
+    }
+
     fun requestStatus() = evaluate(
         "JSON.stringify(window.PocketTranspose ? window.PocketTranspose.getStatus() : {installed:false});"
     ) { raw ->
-        val message = runCatching { JSONTokener(raw).nextValue().toString() }.getOrDefault(raw)
-        if (!activity.isFinishing && !activity.isDestroyed) AlertDialog.Builder(activity)
-            .setTitle("Audio status").setMessage(message).setPositiveButton("OK", null).show()
+        // evaluateJavascript returns the JS string JSON-encoded; unwrap it.
+        val json = runCatching { JSONArray("[$raw]").getString(0) }.getOrDefault(raw)
+        Log.d(LOG_TAG, "status=$json")
+        listener.onStatus(json)
     }
-    private fun evaluate(source: String, callback: ((String) -> Unit)? = null) {
-        webView.evaluateJavascript(source, callback)
+
+    /** Re-applies the native slider values, e.g. after a full page load reset the JS state. */
+    private fun pushSettings() {
+        val s = settings
+        evaluate(
+            "window.PocketTranspose && window.PocketTranspose.applySettings({" +
+                "gain:${s.gain},playbackRate:${s.playbackRate}," +
+                "pitchSemitone:${s.pitchSemitone},preservesPitch:${s.preservesPitch}});"
+        )
+    }
+
+    private fun installDocumentStartScript() {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            documentStartSupported = true
+            documentStartHandler?.remove()
+            // "*" = every origin loaded in this app's WebView (never other apps/browsers).
+            documentStartHandler = WebViewCompat.addDocumentStartJavaScript(webView, scriptProvider.script(mode), setOf("*"))
+            Log.d(LOG_TAG, "document-start injection registered ($mode)")
+        } else {
+            documentStartSupported = false
+            Log.d(LOG_TAG, "document-start injection unavailable; using onPageFinished fallback ($mode)")
+        }
+    }
+
+    private fun injectFallback(target: WebView) {
+        // The script guards against double installation, so this is safe even when the
+        // document-start script already ran.
+        evaluate(scriptProvider.script(mode), target)
+    }
+
+    private fun evaluate(source: String, target: WebView = webView, callback: ((String) -> Unit)? = null) {
+        target.post { target.evaluateJavascript(source, callback) }
+    }
+
+    companion object {
+        private const val LOG_TAG = PocketWebChromeClient.LOG_TAG
+        const val YOUTUBE_URL = "https://m.youtube.com"
+        const val TEST_PAGE_URL = "https://appassets.androidplatform.net/assets/test/media_test.html"
     }
 }
