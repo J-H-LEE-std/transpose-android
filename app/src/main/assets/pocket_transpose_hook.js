@@ -243,6 +243,68 @@
       .some((m) => !m.paused && !m.ended);
   }
 
+  // ---------------------------------------------------------------------------
+  // Truthful page visibility while the app keeps the WebView engine "visible".
+  //
+  // Android WebView pauses hidden <video> itself (by=browser), which mobile Chrome
+  // does not. During background playback the app therefore keeps the WebView's
+  // window visible to the engine, and this override tells the page the truth
+  // instead: document.hidden / visibilityState report "hidden" and the usual
+  // visibilitychange + blur events fire. The site then makes its own decision
+  // exactly as in a mobile browser (YouTube: keeps playing only for Premium).
+  let appHidden = false;
+  const visibilityOverrideInstalled = (function installVisibilityOverride() {
+    try {
+      const proto = window.Document && window.Document.prototype;
+      const hidden = proto && Object.getOwnPropertyDescriptor(proto, 'hidden');
+      const state = proto && Object.getOwnPropertyDescriptor(proto, 'visibilityState');
+      if (!hidden || !hidden.get || !state || !state.get) return false;
+      const define = (name, get) => Object.defineProperty(document, name, { configurable: true, get });
+      define('hidden', function () { return appHidden || hidden.get.call(this); });
+      define('visibilityState', function () { return appHidden ? 'hidden' : state.get.call(this); });
+      const webkitHidden = Object.getOwnPropertyDescriptor(proto, 'webkitHidden');
+      if (webkitHidden && webkitHidden.get) {
+        define('webkitHidden', function () { return appHidden || webkitHidden.get.call(this); });
+      }
+      const webkitState = Object.getOwnPropertyDescriptor(proto, 'webkitVisibilityState');
+      if (webkitState && webkitState.get) {
+        define('webkitVisibilityState', function () { return appHidden ? 'hidden' : webkitState.get.call(this); });
+      }
+      const hasFocus = document.hasFocus;
+      if (typeof hasFocus === 'function') {
+        document.hasFocus = function () { return !appHidden && hasFocus.call(this); };
+      }
+      return true;
+    } catch (e) {
+      log('visibility override failed', e.name, e.message);
+      return false;
+    }
+  })();
+
+  // Applies the app's background state here and forwards it to child frames
+  // (embedded players), which run their own copy of this script.
+  function applyAppHidden(hidden) {
+    if (!visibilityOverrideInstalled) return false;
+    if (appHidden !== hidden) {
+      appHidden = hidden;
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event(hidden ? 'blur' : 'focus'));
+    }
+    const frames = window.frames;
+    for (let i = 0; i < (frames ? frames.length : 0); i++) {
+      try {
+        frames[i].postMessage({ __pocketTransposeAppHidden: hidden }, '*');
+      } catch (e) { /* frame gone */ }
+    }
+    return true;
+  }
+
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (event.source !== window.parent || window.parent === window) return;
+    if (data && typeof data.__pocketTransposeAppHidden === 'boolean') applyAppHidden(data.__pocketTransposeAppHidden);
+  });
+
   // Diagnostics: was a pause requested by page script (e.g. YouTube's player), by
   // this app (PocketTranspose.pause), or done by the browser itself (no pause() call)?
   const PAUSE_CALL_WINDOW_MS = 1000;
@@ -424,6 +486,13 @@
     resume() {
       resumeContext();
     },
+    // Called by the app when it goes to / returns from the background. Returns
+    // false when the page cannot be told (the app then lets the engine hide it).
+    setAppHidden(hidden) {
+      const ok = applyAppHidden(!!hidden);
+      log('app hidden', !!hidden, ok ? '' : '(visibility override unavailable)');
+      return ok;
+    },
     pause() {
       appPauseInProgress = true;
       try {
@@ -492,6 +561,8 @@
         routeChanges: State.routeChanges,
         playing: !!State.playing,
         lastHiddenPause: State.lastHiddenPause,
+        appHidden,
+        visibilityOverrideInstalled,
         settings: Object.assign({}, State.settings)
       };
     }

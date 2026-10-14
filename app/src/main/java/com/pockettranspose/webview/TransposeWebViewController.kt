@@ -24,7 +24,7 @@ import org.json.JSONArray
  */
 class TransposeWebViewController(
     private val activity: Activity,
-    private val webView: WebView,
+    private val webView: PocketWebView,
     private val scriptProvider: InjectedScriptProvider,
     fullscreenContainer: ViewGroup,
     private val listener: Listener
@@ -172,6 +172,42 @@ class TransposeWebViewController(
     fun onHostResumed() = evaluate("window.PocketTranspose && window.PocketTranspose.resume();")
 
     fun pauseMedia() = evaluate("window.PocketTranspose && window.PocketTranspose.pause && window.PocketTranspose.pause();")
+
+    /**
+     * App -> background while media plays: keep the engine from pausing hidden video
+     * (WebView-only behaviour) while telling the page the truth via setAppHidden, so
+     * the site decides as it would in a mobile browser (YouTube: Premium only).
+     *
+     * Only used when every frame is guaranteed to run the hook (hook mode with
+     * document-start injection), so no frame is left believing it is visible. If
+     * the page cannot be told, the held-back hidden state is released at once.
+     */
+    fun enterBackground() {
+        if (!isPlaying || mode != InjectionMode.HOOK || !documentStartSupported) {
+            webView.onPause()
+            return
+        }
+        webView.holdWindowVisible = true
+        evaluate(
+            "window.PocketTranspose && window.PocketTranspose.setAppHidden ? window.PocketTranspose.setAppHidden(true) : false"
+        ) { result ->
+            if (result != "true") {
+                Log.d(LOG_TAG, "page could not be told it is hidden; letting WebView hide it")
+                webView.holdWindowVisible = false
+            }
+        }
+    }
+
+    fun enterForeground() {
+        webView.holdWindowVisible = false
+        webView.onResume()
+        evaluate("window.PocketTranspose && window.PocketTranspose.setAppHidden && window.PocketTranspose.setAppHidden(false);")
+    }
+
+    /** Playback stopped while in the background: let the engine really hide the page. */
+    fun releaseBackgroundHold() {
+        webView.holdWindowVisible = false
+    }
 
     private fun setPlaying(playing: Boolean) {
         if (playing == isPlaying) return

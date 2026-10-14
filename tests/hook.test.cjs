@@ -89,7 +89,7 @@ function fakeMedia(overrides = {}) {
   };
 }
 
-function load(code, windowExtras = {}) {
+function load(code, windowExtras = {}, documentOverride = null) {
   let media = [];
   const timeouts = [];
   const intervals = [];
@@ -97,7 +97,7 @@ function load(code, windowExtras = {}) {
   const window = { addEventListener() {}, AudioContext: FakeAudioContext, ...windowExtras };
   const context = vm.createContext({
     window,
-    document: {
+    document: documentOverride || {
       documentElement: {},
       hidden: false,
       addEventListener() {},
@@ -108,6 +108,7 @@ function load(code, windowExtras = {}) {
     history: { pushState() {}, replaceState() {} },
     console: { log: (...args) => logs.push(args.join(' ')) },
     MutationObserver: class { observe() {} },
+    Event: class { constructor(type) { this.type = type; } },
     setTimeout: (fn) => { timeouts.push(fn); return timeouts.length; },
     setInterval: (fn) => { intervals.push(fn); return intervals.length; }
   });
@@ -123,6 +124,8 @@ function load(code, windowExtras = {}) {
     rerun: run,
     location: context.location,
     document: context.document,
+    setMediaGetter: (fn) => { media = fn; },
+    mediaRef: () => media,
     logs
   };
 }
@@ -327,4 +330,49 @@ test('pause source is attributed when the page is hidden', () => {
   h.scan();
   h.api().pause();
   assert.ok(h.logs.some((l) => l.includes('by=app')));
+});
+
+test('setAppHidden reports the truthful hidden state to the page and child frames', () => {
+  // Fake Document whose real visibility (from the engine) stays "visible".
+  class FakeDocument {
+    get hidden() { return false; }
+    get visibilityState() { return 'visible'; }
+  }
+  const events = [];
+  const doc = Object.assign(Object.create(FakeDocument.prototype), {
+    documentElement: {},
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+    dispatchEvent(event) { events.push('document:' + event.type); (this.listeners[event.type] || []).forEach((fn) => fn(event)); },
+    hasFocus() { return true; },
+    querySelector: () => null,
+    querySelectorAll: () => []
+  });
+  const posted = [];
+  const childFrame = { postMessage: (data) => posted.push(data) };
+  const h = load(HOOK, {
+    Document: FakeDocument,
+    frames: [childFrame],
+    dispatchEvent: (event) => events.push('window:' + event.type)
+  }, doc);
+
+  assert.equal(h.status().visibilityOverrideInstalled, true);
+  assert.equal(h.api().setAppHidden(true), true);
+  assert.equal(doc.hidden, true);
+  assert.equal(doc.visibilityState, 'hidden');
+  assert.equal(doc.hasFocus(), false);
+  assert.deepEqual(events, ['document:visibilitychange', 'window:blur']);
+  assert.equal(JSON.stringify(posted), JSON.stringify([{ __pocketTransposeAppHidden: true }]));
+  assert.ok(h.logs.some((l) => l.includes('page hidden')));
+
+  assert.equal(h.api().setAppHidden(false), true);
+  assert.equal(doc.hidden, false);
+  assert.equal(doc.visibilityState, 'visible');
+  assert.deepEqual(events.slice(2), ['document:visibilitychange', 'window:focus']);
+});
+
+test('setAppHidden returns false when visibility cannot be overridden', () => {
+  const h = load(HOOK);
+  assert.equal(h.status().visibilityOverrideInstalled, false);
+  assert.equal(h.api().setAppHidden(true), false);
 });

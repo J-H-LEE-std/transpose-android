@@ -29,8 +29,8 @@ object PlaybackDiagnostics {
                         "\"Identify as Chrome\" in the Transpose controls and try again."
                 }
             "browser" -> "Background playback stopped by WebView" to
-                "WebView paused the hidden media itself (by=browser), without any page script. " +
-                    "\"Identify as Chrome\" will not help with this."
+                "WebView paused the hidden media itself (by=browser), without any page script. This " +
+                    "happens when playback started after the app was already in the background, or in Probe mode."
             else -> "Background playback stopped" to "Paused while hidden (by=$source)."
         }
         val manager = context.getSystemService(NotificationManager::class.java)

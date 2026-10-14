@@ -16,7 +16,6 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.webkit.WebView
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -26,12 +25,13 @@ import com.pockettranspose.playback.PlaybackService
 import com.pockettranspose.script.InjectedScriptProvider
 import com.pockettranspose.script.InjectionMode
 import com.pockettranspose.ui.ControlSheet
+import com.pockettranspose.webview.PocketWebView
 import com.pockettranspose.webview.TransposeWebViewController
 import org.json.JSONObject
 import java.util.Locale
 
 class MainActivity : Activity(), TransposeWebViewController.Listener, ControlSheet.Actions {
-    private lateinit var webView: WebView
+    private lateinit var webView: PocketWebView
     private lateinit var controller: TransposeWebViewController
     private lateinit var root: FrameLayout
     private lateinit var contentLayout: LinearLayout
@@ -40,10 +40,11 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     private lateinit var urlInput: EditText
     private lateinit var sheet: ControlSheet
     private var notificationPermissionAsked = false
+    private var isInForeground = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        webView = WebView(this)
+        webView = PocketWebView(this)
         fullscreenContainer = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             visibility = View.GONE
@@ -77,7 +78,8 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
 
     override fun onResume() {
         super.onResume()
-        webView.onResume()
+        isInForeground = true
+        controller.enterForeground()
         // Background -> foreground: give the AudioContext a chance to resume.
         controller.onHostResumed()
     }
@@ -85,8 +87,9 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     override fun onPause() {
         // While media plays, keep the WebView running so playback can continue in the
         // background (the playback foreground service keeps the process alive). The
-        // page itself still decides whether it keeps playing when hidden.
-        if (!controller.isPlaying) webView.onPause()
+        // page is told it is hidden and decides itself whether to keep playing.
+        isInForeground = false
+        controller.enterBackground()
         super.onPause()
     }
 
@@ -118,6 +121,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
             PlaybackService.onPlaying(this, playbackSummary())
         } else {
             PlaybackService.onPaused()
+            if (!isInForeground) controller.releaseBackgroundHold()
         }
     }
 

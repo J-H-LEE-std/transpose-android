@@ -152,9 +152,11 @@ Results below are from the cloud build environment. The debug APK builds, but **
 
 ## Background playback
 
+Android WebView pauses hidden `<video>` on its own (mobile Chrome does not), so while media plays in the background the app keeps the WebView's window "visible" **to the engine only** (`PocketWebView.holdWindowVisible`) and at the same time tells the **page** the truth through `PocketTranspose.setAppHidden(true)`: `document.hidden` / `visibilityState` report `hidden`, `hasFocus()` is false, and `visibilitychange` + `blur` fire, also in child frames. The site therefore makes the same decision it makes in a mobile browser. This is only enabled in hook mode with document-start injection (so every frame is told); otherwise the WebView is hidden normally.
+
 When page media starts playing, the hook logs `[PocketTranspose] playback state playing`; the app reads that line through the existing console bridge (no `addJavascriptInterface`) and starts a `mediaPlayback` foreground service with a notification (Pause / Stop). While media plays, leaving the app does not pause the WebView, and the service keeps the process and WebView renderer from being frozen or killed. After a pause the service lingers 5 minutes (so a playlist can advance without a background restart, which Android 12+ forbids) and then stops.
 
-The app does **not** fake page visibility. Whether a site keeps playing when hidden is the site's decision: YouTube allows background playback on mobile web only for **YouTube Premium** members ([YouTube Help](https://support.google.com/youtube/answer/7356379)); other HTML5 media normally keeps playing.
+The page is never told it is visible while the app is in the background. Whether a site keeps playing when hidden is the site's decision: YouTube allows background playback on mobile web only for **YouTube Premium** members ([YouTube Help](https://support.google.com/youtube/answer/7356379)); other HTML5 media normally keeps playing.
 
 When media is paused while the app is in the background, the app also posts a **Playback diagnostics** notification naming the cause (no adb needed), and Status shows it as `lastHiddenPause`. With adb, `adb logcat -s PocketTransposeJS` after pressing Home during playback shows:
 
