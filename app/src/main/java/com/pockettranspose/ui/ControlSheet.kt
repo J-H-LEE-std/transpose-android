@@ -29,13 +29,18 @@ import kotlin.math.roundToInt
  * page scrolling, and swiping up from the screen edge is the system home gesture.
  */
 @SuppressLint("ViewConstructor")
-class ControlSheet(context: Context, private val actions: Actions) : LinearLayout(context) {
+class ControlSheet(
+    context: Context,
+    private val actions: Actions,
+    private val identifyAsChromeInitially: Boolean
+) : LinearLayout(context) {
     interface Actions {
         fun onPitch(semitone: Int)
         fun onSpeed(rate: Float)
         fun onGain(gain: Float)
         fun onPreservesPitch(enabled: Boolean)
         fun onProbeOnly(enabled: Boolean)
+        fun onIdentifyAsChrome(enabled: Boolean)
         fun onYouTube()
         fun onTestPage()
         fun onReinject()
@@ -197,6 +202,11 @@ class ControlSheet(context: Context, private val actions: Actions) : LinearLayou
             addView(checkBox("Preserve pitch on speed change", true) { actions.onPreservesPitch(it) },
                 LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             addView(checkBox("Probe only", false) { actions.onProbeOnly(it) })
+        })
+        // For YouTube Premium background playback, which YouTube may only offer to
+        // mobile browsers. Reloads the page.
+        addView(checkBox("Identify as Chrome (Premium background play)", identifyAsChromeInitially) {
+            actions.onIdentifyAsChrome(it)
         })
 
         addView(buttonRow("Reset" to { rows.forEach { it.reset() } }, "Status" to { actions.onStatus() }))

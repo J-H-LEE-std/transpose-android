@@ -161,8 +161,12 @@ Diagnosing with `adb logcat -s PocketTransposeJS` after pressing Home during pla
 | Log after going to background | Meaning |
 | --- | --- |
 | `page hidden mediaPlaying=true`, then nothing | Playing in the background (expected) |
-| `page hidden …`, then `media paused while page hidden` + `playback state paused` | The page paused itself (for YouTube: not treated as Premium in this WebView) |
+| `media paused while page hidden by=page-script` | The page's own script paused it. For YouTube with Premium: YouTube did not treat this WebView as a mobile browser; try **Identify as Chrome** (below) |
+| `media paused while page hidden by=browser` | WebView paused the hidden media itself (no script `pause()` call) |
+| `media paused while page hidden by=app` | The notification's Pause/Stop was used |
 | `playback service not started: ForegroundServiceStartNotAllowedException` | Playback started while the app was already in the background; open the app once while playing |
+
+**Identify as Chrome** (control sheet, off by default, persisted, reloads the page) removes the `; wv` and `Version/x` tokens from the User-Agent and renames the `Android WebView` client-hint brand to `Google Chrome`, so sites see a mobile Chrome browser. It exists for YouTube Premium background playback, which YouTube may only offer to mobile browsers; it does not change what an account is entitled to (non-Premium accounts still get YouTube's normal pause-when-hidden behaviour). Note that Google discourages signing in to Google accounts inside embedded WebViews.
 
 ## Known limitations / risks
 

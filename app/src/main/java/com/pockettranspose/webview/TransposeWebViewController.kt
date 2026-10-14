@@ -6,7 +6,9 @@ import android.util.Log
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.webkit.ScriptHandler
+import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.pockettranspose.BuildConfig
@@ -49,6 +51,11 @@ class TransposeWebViewController(
         private set
 
     private var documentStartHandler: ScriptHandler? = null
+    private var defaultUserAgent: String? = null
+    private var defaultUserAgentMetadata: UserAgentMetadata? = null
+
+    var identifyAsChrome = false
+        private set
 
     private val chromeClient = PocketWebChromeClient(
         fullscreenContainer,
@@ -103,6 +110,47 @@ class TransposeWebViewController(
     fun loadYouTube() = webView.loadUrl(YOUTUBE_URL)
 
     fun loadTestPage() = webView.loadUrl(TEST_PAGE_URL)
+
+    /**
+     * Presents this WebView as mobile Chrome: drops the "; wv" / "Version/x" tokens
+     * from the User-Agent and renames the "Android WebView" client-hint brand.
+     * For sites that offer a feature to mobile browsers but not to WebViews, such as
+     * YouTube Premium background playback. It does not change what an account is
+     * entitled to. Off by default.
+     */
+    fun setIdentifyAsChrome(enabled: Boolean, reload: Boolean) {
+        val settings = webView.settings
+        if (defaultUserAgent == null) {
+            defaultUserAgent = settings.userAgentString
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+                defaultUserAgentMetadata = WebSettingsCompat.getUserAgentMetadata(settings)
+            }
+        }
+        identifyAsChrome = enabled
+        val baseAgent = defaultUserAgent.orEmpty()
+        settings.userAgentString = if (enabled) chromeUserAgent(baseAgent) else baseAgent
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+            defaultUserAgentMetadata?.let { metadata ->
+                WebSettingsCompat.setUserAgentMetadata(settings, if (enabled) chromeMetadata(metadata) else metadata)
+            }
+        }
+        Log.d(LOG_TAG, "identify as Chrome: $enabled")
+        if (reload) webView.reload()
+    }
+
+    private fun chromeUserAgent(agent: String): String =
+        agent.replace("; wv)", ")").replace(Regex("Version/\\S+ "), "")
+
+    private fun chromeMetadata(metadata: UserAgentMetadata): UserAgentMetadata {
+        val brands = metadata.brandVersionList.map { brand ->
+            if (brand.brand == "Android WebView") {
+                UserAgentMetadata.BrandVersion.Builder(brand).setBrand("Google Chrome").build()
+            } else {
+                brand
+            }
+        }
+        return UserAgentMetadata.Builder(metadata).setBrandVersionList(brands).build()
+    }
 
     /** Switches between the probe and hook scripts; takes effect after a reload. */
     fun setMode(newMode: InjectionMode) {

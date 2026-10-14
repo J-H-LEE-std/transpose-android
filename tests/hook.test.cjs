@@ -89,12 +89,12 @@ function fakeMedia(overrides = {}) {
   };
 }
 
-function load(code) {
+function load(code, windowExtras = {}) {
   let media = [];
   const timeouts = [];
   const intervals = [];
   const logs = [];
-  const window = { addEventListener() {}, AudioContext: FakeAudioContext };
+  const window = { addEventListener() {}, AudioContext: FakeAudioContext, ...windowExtras };
   const context = vm.createContext({
     window,
     document: {
@@ -122,6 +122,7 @@ function load(code) {
     flushTimeouts: () => { while (timeouts.length) timeouts.shift()(); },
     rerun: run,
     location: context.location,
+    document: context.document,
     logs
   };
 }
@@ -294,4 +295,35 @@ test('pausing one element does not report paused while another still plays', () 
   a.fire('pause');
   assert.equal(h.status().playing, true);
   assert.equal(h.logs.some((l) => l.includes('playback state paused')), false);
+});
+
+test('pause source is attributed when the page is hidden', () => {
+  // Fake prototype so the hook can wrap pause() like HTMLMediaElement.prototype.pause.
+  class FakeMediaElement {
+    pause() { this.paused = true; this.fire('pause'); }
+  }
+  const h = load(HOOK, { HTMLMediaElement: FakeMediaElement });
+  const make = () => Object.assign(Object.create(FakeMediaElement.prototype), fakeMedia(), {
+    pause: FakeMediaElement.prototype.pause
+  });
+  const byPage = make();
+  h.setMedia([byPage]);
+  h.scan();
+  h.document.hidden = true;
+  FakeMediaElement.prototype.pause.call(byPage);
+  assert.ok(h.logs.some((l) => l.includes('media paused while page hidden by=page-script')), h.logs.join('\n'));
+
+  const byBrowser = make();
+  h.setMedia([byBrowser]);
+  h.scan();
+  byBrowser.paused = true;
+  byBrowser.fire('pause');
+  assert.ok(h.logs.some((l) => l.includes('by=browser')));
+
+  const byApp = make();
+  byApp.paused = false;
+  h.setMedia([byApp]);
+  h.scan();
+  h.api().pause();
+  assert.ok(h.logs.some((l) => l.includes('by=app')));
 });

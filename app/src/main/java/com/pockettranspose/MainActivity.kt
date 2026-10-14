@@ -51,6 +51,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
             this, webView, InjectedScriptProvider(this), fullscreenContainer, this
         )
         controller.configure()
+        controller.setIdentifyAsChrome(prefs().getBoolean(PREF_IDENTIFY_AS_CHROME, false), reload = false)
         PlaybackService.pauseMediaHandler = { controller.pauseMedia() }
         layOutEdgeToEdge()
         setContentView(buildLayout())
@@ -146,6 +147,13 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     override fun onPreservesPitch(enabled: Boolean) = controller.setPreservesPitch(enabled)
     override fun onProbeOnly(enabled: Boolean) =
         controller.setMode(if (enabled) InjectionMode.PROBE else InjectionMode.HOOK)
+    override fun onIdentifyAsChrome(enabled: Boolean) {
+        prefs().edit().putBoolean(PREF_IDENTIFY_AS_CHROME, enabled).apply()
+        controller.setIdentifyAsChrome(enabled, reload = true)
+    }
+
+    private fun prefs() = getSharedPreferences("settings", Context.MODE_PRIVATE)
+
     override fun onYouTube() = controller.loadYouTube()
     override fun onTestPage() = controller.loadTestPage()
     override fun onReinject() = controller.reinject()
@@ -207,7 +215,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     // --- Layout (programmatic, no extra UI dependencies) ---
 
     private fun buildLayout(): View {
-        sheet = ControlSheet(this, this)
+        sheet = ControlSheet(this, this, controller.identifyAsChrome)
         handleSpacer = View(this)
         contentLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -280,6 +288,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
 
     private companion object {
         const val REQUEST_NOTIFICATIONS = 1
+        const val PREF_IDENTIFY_AS_CHROME = "identify_as_chrome"
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

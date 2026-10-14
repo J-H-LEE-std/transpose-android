@@ -242,6 +242,30 @@
       .some((m) => !m.paused && !m.ended);
   }
 
+  // Diagnostics: was a pause requested by page script (e.g. YouTube's player), by
+  // this app (PocketTranspose.pause), or done by the browser itself (no pause() call)?
+  const PAUSE_CALL_WINDOW_MS = 1000;
+  let appPauseInProgress = false;
+  (function wrapPause() {
+    const proto = window.HTMLMediaElement && window.HTMLMediaElement.prototype;
+    if (!proto || typeof proto.pause !== 'function' || proto.pause.__PocketTransposeWrapped) return;
+    const original = proto.pause;
+    const wrapped = function (...args) {
+      try {
+        this.__PocketTransposePauseCall = { at: Date.now(), byApp: appPauseInProgress };
+      } catch (e) { /* non-extensible element: diagnostics only */ }
+      return original.apply(this, args);
+    };
+    wrapped.__PocketTransposeWrapped = true;
+    proto.pause = wrapped;
+  })();
+
+  function pauseSource(media) {
+    const call = media.__PocketTransposePauseCall;
+    if (!call || Date.now() - call.at > PAUSE_CALL_WINDOW_MS) return 'browser';
+    return call.byApp ? 'app' : 'page-script';
+  }
+
   function listenMedia(media) {
     if (State.listened.has(media)) return;
     State.listened.add(media);
@@ -250,7 +274,7 @@
       reportPlayback(true);
     };
     const onStop = () => {
-      if (document.hidden) log('media paused while page hidden');
+      if (document.hidden) log('media paused while page hidden', 'by=' + pauseSource(media));
       reportPlayback(anyMediaPlaying());
     };
     media.addEventListener('play', onPlay);
@@ -396,9 +420,14 @@
       resumeContext();
     },
     pause() {
-      Array.prototype.slice.call(document.querySelectorAll('video, audio')).forEach((m) => {
-        if (!m.paused) m.pause();
-      });
+      appPauseInProgress = true;
+      try {
+        Array.prototype.slice.call(document.querySelectorAll('video, audio')).forEach((m) => {
+          if (!m.paused) m.pause();
+        });
+      } finally {
+        appPauseInProgress = false;
+      }
     },
     setGain(value) {
       State.settings.gain = clamp(value, 0, 4, 1);
