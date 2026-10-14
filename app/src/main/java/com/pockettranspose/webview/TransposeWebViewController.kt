@@ -156,14 +156,14 @@ class TransposeWebViewController(
     }
 
     private fun installDocumentStartScript() {
-        documentStartHandler?.remove()
-        documentStartHandler = null
-        documentStartSupported = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
-        if (documentStartSupported) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            documentStartSupported = true
+            documentStartHandler?.remove()
             // "*" = every origin loaded in this app's WebView (never other apps/browsers).
             documentStartHandler = WebViewCompat.addDocumentStartJavaScript(webView, scriptProvider.script(mode), setOf("*"))
             Log.d(LOG_TAG, "document-start injection registered ($mode)")
         } else {
+            documentStartSupported = false
             Log.d(LOG_TAG, "document-start injection unavailable; using onPageFinished fallback ($mode)")
         }
     }

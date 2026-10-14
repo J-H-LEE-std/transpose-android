@@ -103,13 +103,14 @@ If YouTube becomes silent with the hook, enable **Probe only** (page reloads wit
 
 ## Test result table
 
-Results below are from the environment this PoC was written in. **No Android device or emulator was available** (and Google Maven was blocked, so the APK could not be assembled); the Android rows must be filled in on a real device.
+Results below are from the cloud build environment. The debug APK builds, but **no Android device or emulator was available**, so the Android rows must be filled in on a real device.
 
 | # | Scenario | Success criteria | Observed result | Next action on failure |
 | --- | --- | --- | --- | --- |
 | 0 | Hook script in desktop headless Chromium (Playwright, local test page) | `script installed`, `media found`, `media element source connected`, gain/speed applied, AudioWorklet pitch engine, signal detected, SPA re-hook | **Pass** – all logs present, `inputLevelDb` ≈ −22 dBFS, `pitchEngine: audioworklet`; with AudioWorklet removed it falls back to `scriptprocessor`; `pushState` + element swap re-hooked (`hookedCount: 2`) | – |
 | 0 | Pitch DSP offline test (Node, 440 Hz sine) | Peak frequency = 440·2^(n/12) | **Pass** – −12: 220 Hz, −2: 392, −1: 415.5, +1: 466, +2: 494, +12: 880 Hz; level unchanged | – |
-| 0 | Kotlin sources compile check (against Robolectric `android-all` API 34 + `androidx.webkit` signature stubs) | No compile errors | **Pass** | Re-check with the real AGP build |
+| 0 | `./gradlew :app:assembleDebug` (AGP 8.13.2, compileSdk 35, JDK 21) | APK builds; license gate passes | **Pass** – `app-debug.apk` built; all 12 runtime modules Apache-2.0; no Kotlin compiler warnings | – |
+| 0 | `./gradlew :app:lintDebug` | No lint errors | **Pass** – 0 errors; remaining warnings are version-bump suggestions (compileSdk 36, webkit 1.17.1, Gradle 8.14.6), missing app icon, `allowBackup` deprecation, and hard-coded UI strings | – |
 | 1 | General HTML5 media page (Test page) | `media found`, `media element source connected`, gain, speed, pitch audible | Not yet tested on device | Check `lastError` / `pitchError` in Status |
 | 2 | YouTube mobile page | Video found and Web Audio connection success, or a clear exception log | Not yet tested on device | Record CORS/silence/element-replacement behaviour; compare with Probe only |
 | 3 | YouTube video transition | New-route logs and media re-hook after selecting another video | Not yet tested on device | Strengthen SPA detection / rescan cadence |
