@@ -53,10 +53,8 @@ class ControlSheet(
     private val summary: TextView
     private lateinit var statusText: TextView
     private val rows = mutableListOf<StepperRow>()
+    private var suppressCallbacks = false
 
-    private var pitch = 0
-    private var speed = 100
-    private var gain = 100
 
     var isExpanded = false
         private set
@@ -93,6 +91,18 @@ class ControlSheet(
     fun expand() = settle(true)
 
     fun collapse() = settle(false)
+
+    /** Shows values loaded from elsewhere (per-video settings) without echoing them back. */
+    fun setValues(pitchSemitone: Int, speedPercent: Int, gainPercent: Int) {
+        suppressCallbacks = true
+        try {
+            rows[0].setValue(pitchSemitone)
+            rows[1].setValue(speedPercent)
+            rows[2].setValue(gainPercent)
+        } finally {
+            suppressCallbacks = false
+        }
+    }
 
     fun showStatus(text: String) {
         statusText.text = text
@@ -183,16 +193,11 @@ class ControlSheet(
         orientation = VERTICAL
         setPadding(dp(16), 0, dp(16), dp(12))
 
-        rows += StepperRow("Pitch", -12, 12, 1, 0, { "%+d st".format(Locale.US, it) }) {
-            pitch = it
-            actions.onPitch(it)
-        }
+        rows += StepperRow("Pitch", -12, 12, 1, 0, { "%+d st".format(Locale.US, it) }) { actions.onPitch(it) }
         rows += StepperRow("Speed", 25, 300, 5, 100, { "%.2fx".format(Locale.US, it / 100f) }) {
-            speed = it
             actions.onSpeed(it / 100f)
         }
         rows += StepperRow("Gain", 0, 200, 5, 100, { "%.2f".format(Locale.US, it / 100f) }) {
-            gain = it
             actions.onGain(it / 100f)
         }
         rows.forEach { addView(it.view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)) }
@@ -226,7 +231,10 @@ class ControlSheet(
     }
 
     private fun updateSummary() {
-        summary.text = "%+d st · %.2fx · gain %.2f".format(Locale.US, pitch, speed / 100f, gain / 100f)
+        if (rows.size < 3) return
+        summary.text = "%+d st · %.2fx · gain %.2f".format(
+            Locale.US, rows[0].value, rows[1].value / 100f, rows[2].value / 100f
+        )
     }
 
     /** One setting: label + value on top, [−] slider [+] below. Long-press the value to reset. */
@@ -250,7 +258,7 @@ class ControlSheet(
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     val value = progress + minValue
                     valueText.text = format(value)
-                    onChanged(value)
+                    if (!suppressCallbacks) onChanged(value)
                     updateSummary()
                 }
 
@@ -286,6 +294,12 @@ class ControlSheet(
             val current = seekBar.progress + minValue
             val snapped = ((current + delta).toFloat() / step).roundToInt() * step
             seekBar.progress = snapped.coerceIn(minValue, maxValue) - minValue
+        }
+
+        val value: Int get() = seekBar.progress + minValue
+
+        fun setValue(value: Int) {
+            seekBar.progress = value.coerceIn(minValue, maxValue) - minValue
         }
 
         fun reset() {
