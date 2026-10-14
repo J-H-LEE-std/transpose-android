@@ -10,8 +10,10 @@
   let lastMedia = null;
   let routeChanges = 0;
 
+  // Privacy: never log URLs.
   function log(...args) {
-    console.log('[PocketTranspose]', ...args);
+    console.log('[PocketTranspose]', ...args.map((v) =>
+      typeof v === 'string' ? v.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>') : v));
   }
 
   // Never log full media URLs (privacy policy); only the scheme kind.

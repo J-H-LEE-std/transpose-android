@@ -123,14 +123,19 @@
     settings: { gain: 1, playbackRate: 1, pitchSemitone: 0, preservesPitch: true }
   };
 
+  // Privacy: never log URLs (exception messages can contain media URLs with tokens).
+  function redactUrls(value) {
+    return typeof value === 'string' ? value.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>') : value;
+  }
+
   function log(...args) {
-    console.log('[PocketTranspose]', ...args);
+    console.log('[PocketTranspose]', ...args.map(redactUrls));
   }
 
   function safeError(error) {
     return {
       name: error && error.name ? error.name : 'Error',
-      message: error && error.message ? error.message : String(error)
+      message: redactUrls(error && error.message ? error.message : String(error))
     };
   }
 
