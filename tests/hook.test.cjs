@@ -81,7 +81,10 @@ function fakeMedia(overrides = {}) {
     crossOrigin: null,
     playbackRate: 1,
     preservesPitch: true,
-    addEventListener() {},
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+    fire(type) { (this.listeners[type] || []).forEach((fn) => fn()); },
+    pause() { this.paused = true; this.fire('pause'); },
     ...overrides
   };
 }
@@ -259,4 +262,36 @@ test('probe finds media without touching Web Audio', () => {
   assert.equal(h.status().mode, 'probe');
   assert.equal(h.status().hasMedia, true);
   assert.equal(h.logs.some((l) => l.includes('secret')), false);
+});
+
+test('playback state is reported once per change for the app foreground service', () => {
+  const h = load(HOOK);
+  const media = fakeMedia({ paused: true });
+  h.setMedia([media]);
+  h.scan();
+  const states = () => h.logs.filter((l) => l.includes('playback state'));
+  assert.equal(states().length, 0);
+
+  media.paused = false;
+  media.fire('play');
+  media.fire('playing');
+  assert.deepEqual(states(), ['[PocketTranspose] playback state playing']);
+  assert.equal(h.status().playing, true);
+
+  h.api().pause();
+  assert.equal(media.paused, true);
+  assert.deepEqual(states().at(-1), '[PocketTranspose] playback state paused');
+  assert.equal(h.status().playing, false);
+});
+
+test('pausing one element does not report paused while another still plays', () => {
+  const h = load(HOOK);
+  const a = fakeMedia();
+  const b = fakeMedia();
+  h.setMedia([a, b]);
+  h.scan();
+  a.paused = true;
+  a.fire('pause');
+  assert.equal(h.status().playing, true);
+  assert.equal(h.logs.some((l) => l.includes('playback state paused')), false);
 });

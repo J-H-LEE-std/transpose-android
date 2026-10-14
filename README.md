@@ -112,6 +112,8 @@ Play a video, enter fullscreen, rotate, then exit with the back button or the pl
 
 ### Test 5 – background / foreground
 
+See **Background playback** below for the expected logs.
+
 Play, press Home, return to the app, tap **Status**. `audioContextState` should be `running` (the app calls `PocketTranspose.resume()` in `onResume`).
 
 ### Hook vs. probe comparison
@@ -147,6 +149,20 @@ Results below are from the cloud build environment. The debug APK builds, but **
 | Speed | Playback speed changes | Check `mediaPlaybackRate` in Status (YouTube may override it) |
 | Pitch | Audible pitch change, no crackle | Check `pitchEngine` / `pitchError` in Status; if it crackles, check whether it also crackles at Pitch 0 (bypass) |
 | YouTube transition | Re-scan on new video | Strengthen SPA event detection |
+
+## Background playback
+
+When page media starts playing, the hook logs `[PocketTranspose] playback state playing`; the app reads that line through the existing console bridge (no `addJavascriptInterface`) and starts a `mediaPlayback` foreground service with a notification (Pause / Stop). While media plays, leaving the app does not pause the WebView, and the service keeps the process and WebView renderer from being frozen or killed. After a pause the service lingers 5 minutes (so a playlist can advance without a background restart, which Android 12+ forbids) and then stops.
+
+The app does **not** fake page visibility. Whether a site keeps playing when hidden is the site's decision: YouTube allows background playback on mobile web only for **YouTube Premium** members ([YouTube Help](https://support.google.com/youtube/answer/7356379)); other HTML5 media normally keeps playing.
+
+Diagnosing with `adb logcat -s PocketTransposeJS` after pressing Home during playback:
+
+| Log after going to background | Meaning |
+| --- | --- |
+| `page hidden mediaPlaying=true`, then nothing | Playing in the background (expected) |
+| `page hidden …`, then `media paused while page hidden` + `playback state paused` | The page paused itself (for YouTube: not treated as Premium in this WebView) |
+| `playback service not started: ForegroundServiceStartNotAllowedException` | Playback started while the app was already in the background; open the app once while playing |
 
 ## Known limitations / risks
 

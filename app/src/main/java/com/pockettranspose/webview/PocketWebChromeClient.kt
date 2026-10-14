@@ -11,7 +11,8 @@ import com.pockettranspose.BuildConfig
 class PocketWebChromeClient(
     private val fullscreenContainer: ViewGroup,
     private val onFullscreenChanged: (Boolean) -> Unit,
-    private val onLoadComplete: (WebView) -> Unit
+    private val onLoadComplete: (WebView) -> Unit,
+    private val onPlaybackStateChanged: (Boolean) -> Unit
 ) : WebChromeClient() {
     private var fullscreenView: View? = null
     private var fullscreenCallback: CustomViewCallback? = null
@@ -24,6 +25,10 @@ class PocketWebChromeClient(
         // page data) are forwarded only in debug builds. sourceId (a URL) is never logged.
         if (message.startsWith(JS_LOG_PREFIX) || BuildConfig.DEBUG) {
             Log.d(LOG_TAG, "$message (line ${consoleMessage.lineNumber()})")
+        }
+        when (message) {
+            PLAYBACK_PLAYING -> onPlaybackStateChanged(true)
+            PLAYBACK_PAUSED -> onPlaybackStateChanged(false)
         }
         return true
     }
@@ -72,5 +77,10 @@ class PocketWebChromeClient(
     companion object {
         const val LOG_TAG = "PocketTransposeJS"
         private const val JS_LOG_PREFIX = "[PocketTranspose]"
+
+        // Emitted by pocket_transpose_hook.js (reportPlayback). A page could print the
+        // same line; the worst it can do is start/stop our playback service.
+        private const val PLAYBACK_PLAYING = "$JS_LOG_PREFIX playback state playing"
+        private const val PLAYBACK_PAUSED = "$JS_LOG_PREFIX playback state paused"
     }
 }

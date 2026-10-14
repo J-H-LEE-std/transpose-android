@@ -116,6 +116,7 @@
     hookedCount: 0,
     lastError: null,
     lastHref: location.href,
+    playing: null,
     routeChanges: 0,
     silenceWarned: false,
     observer: null,
@@ -228,14 +229,39 @@
     }
   }
 
+  // The app parses these exact lines (console bridge, no JS interface) to keep a
+  // media-playback foreground service running while something plays.
+  function reportPlayback(playing) {
+    if (State.playing === playing) return;
+    State.playing = playing;
+    log('playback state', playing ? 'playing' : 'paused');
+  }
+
+  function anyMediaPlaying() {
+    return Array.prototype.slice.call(document.querySelectorAll('video, audio'))
+      .some((m) => !m.paused && !m.ended);
+  }
+
   function listenMedia(media) {
     if (State.listened.has(media)) return;
     State.listened.add(media);
-    media.addEventListener('play', resumeContext);
-    media.addEventListener('playing', resumeContext);
+    const onPlay = () => {
+      resumeContext();
+      reportPlayback(true);
+    };
+    const onStop = () => {
+      if (document.hidden) log('media paused while page hidden');
+      reportPlayback(anyMediaPlaying());
+    };
+    media.addEventListener('play', onPlay);
+    media.addEventListener('playing', onPlay);
+    media.addEventListener('pause', onStop);
+    media.addEventListener('ended', onStop);
+    media.addEventListener('emptied', onStop);
     media.addEventListener('loadedmetadata', () => {
       if (media === State.media) applyMediaSettings(media);
     });
+    if (!media.paused && !media.ended) reportPlayback(true);
   }
 
   function hookMedia(media) {
@@ -369,6 +395,11 @@
     resume() {
       resumeContext();
     },
+    pause() {
+      Array.prototype.slice.call(document.querySelectorAll('video, audio')).forEach((m) => {
+        if (!m.paused) m.pause();
+      });
+    },
     setGain(value) {
       State.settings.gain = clamp(value, 0, 4, 1);
       if (State.gain) State.gain.gain.value = State.settings.gain;
@@ -425,6 +456,7 @@
         pitchError: State.pitchError,
         lastError: State.lastError,
         routeChanges: State.routeChanges,
+        playing: !!State.playing,
         settings: Object.assign({}, State.settings)
       };
     }
@@ -438,7 +470,10 @@
   // Any user gesture is a chance to leave the "suspended" autoplay state.
   window.addEventListener('pointerdown', resumeContext, true);
   window.addEventListener('touchend', resumeContext, true);
+  // Diagnostics for background playback: tells "the page paused itself when hidden"
+  // apart from "the app/OS stopped playback".
   document.addEventListener('visibilitychange', () => {
+    log(document.hidden ? 'page hidden' : 'page visible', 'mediaPlaying=' + anyMediaPlaying());
     if (!document.hidden) resumeContext();
   });
 

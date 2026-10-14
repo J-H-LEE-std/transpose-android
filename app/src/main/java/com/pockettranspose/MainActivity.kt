@@ -1,7 +1,9 @@
 package com.pockettranspose
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
@@ -19,11 +21,13 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.pockettranspose.playback.PlaybackService
 import com.pockettranspose.script.InjectedScriptProvider
 import com.pockettranspose.script.InjectionMode
 import com.pockettranspose.ui.ControlSheet
 import com.pockettranspose.webview.TransposeWebViewController
 import org.json.JSONObject
+import java.util.Locale
 
 class MainActivity : Activity(), TransposeWebViewController.Listener, ControlSheet.Actions {
     private lateinit var webView: WebView
@@ -34,6 +38,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     private lateinit var fullscreenContainer: FrameLayout
     private lateinit var urlInput: EditText
     private lateinit var sheet: ControlSheet
+    private var notificationPermissionAsked = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +51,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
             this, webView, InjectedScriptProvider(this), fullscreenContainer, this
         )
         controller.configure()
+        PlaybackService.pauseMediaHandler = { controller.pauseMedia() }
         layOutEdgeToEdge()
         setContentView(buildLayout())
         if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) controller.loadYouTube()
@@ -75,11 +81,16 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     }
 
     override fun onPause() {
-        webView.onPause()
+        // While media plays, keep the WebView running so playback can continue in the
+        // background (the playback foreground service keeps the process alive). The
+        // page itself still decides whether it keeps playing when hidden.
+        if (!controller.isPlaying) webView.onPause()
         super.onPause()
     }
 
     override fun onDestroy() {
+        PlaybackService.pauseMediaHandler = null
+        PlaybackService.stop(this)
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
         super.onDestroy()
@@ -97,6 +108,30 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
         sheet.visibility = visibility
         setSystemBarsHidden(fullscreen)
         root.requestApplyInsets()
+    }
+
+    override fun onPlaybackStateChanged(playing: Boolean) {
+        if (playing) {
+            requestNotificationPermissionOnce()
+            PlaybackService.onPlaying(this, playbackSummary())
+        } else {
+            PlaybackService.onPaused()
+        }
+    }
+
+    private fun playbackSummary(): String {
+        val s = controller.settings
+        return "Transpose %+d · %.2fx · gain %.2f".format(Locale.US, s.pitchSemitone, s.playbackRate, s.gain)
+    }
+
+    // Android 13+: the playback notification needs POST_NOTIFICATIONS. Playback works
+    // without it; the notification just stays hidden. Ask once, on first playback.
+    private fun requestNotificationPermissionOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || notificationPermissionAsked) return
+        notificationPermissionAsked = true
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+        }
     }
 
     override fun onStatus(statusJson: String) {
@@ -241,6 +276,10 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
         urlInput.clearFocus()
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
             .hideSoftInputFromWindow(urlInput.windowToken, 0)
+    }
+
+    private companion object {
+        const val REQUEST_NOTIFICATIONS = 1
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

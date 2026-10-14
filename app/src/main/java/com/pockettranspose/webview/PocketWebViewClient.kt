@@ -1,5 +1,6 @@
 package com.pockettranspose.webview
 
+import android.graphics.Bitmap
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -8,6 +9,7 @@ import androidx.webkit.WebViewAssetLoader
 
 class PocketWebViewClient(
     private val assetLoader: WebViewAssetLoader,
+    private val onPageStarted: () -> Unit,
     private val onPageFinished: (WebView) -> Unit,
     private val onUrlChanged: (String?) -> Unit
 ) : WebViewClient() {
@@ -15,6 +17,11 @@ class PocketWebViewClient(
     // which is a secure context, so AudioWorklet is available there too.
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
         assetLoader.shouldInterceptRequest(request.url)
+
+    override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+        super.onPageStarted(view, url, favicon)
+        onPageStarted()
+    }
 
     override fun onPageFinished(view: WebView, url: String?) {
         super.onPageFinished(view, url)

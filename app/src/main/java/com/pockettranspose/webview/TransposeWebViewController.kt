@@ -31,6 +31,7 @@ class TransposeWebViewController(
         fun onUrlChanged(url: String?)
         fun onFullscreenChanged(fullscreen: Boolean)
         fun onStatus(statusJson: String)
+        fun onPlaybackStateChanged(playing: Boolean)
     }
 
     data class AudioSettings(
@@ -52,8 +53,13 @@ class TransposeWebViewController(
     private val chromeClient = PocketWebChromeClient(
         fullscreenContainer,
         onFullscreenChanged = { listener.onFullscreenChanged(it) },
-        onLoadComplete = { injectFallback(it) }
+        onLoadComplete = { injectFallback(it) },
+        onPlaybackStateChanged = { setPlaying(it) }
     )
+
+    /** Whether page media is playing, as reported by the hook script. */
+    var isPlaying = false
+        private set
 
     val isFullscreen: Boolean get() = chromeClient.isFullscreen
 
@@ -76,6 +82,8 @@ class TransposeWebViewController(
         webView.webChromeClient = chromeClient
         webView.webViewClient = PocketWebViewClient(
             assetLoader,
+            // A full navigation tears down the page and its media.
+            onPageStarted = { setPlaying(false) },
             onPageFinished = {
                 injectFallback(it)
                 pushSettings()
@@ -112,6 +120,14 @@ class TransposeWebViewController(
     }
 
     fun onHostResumed() = evaluate("window.PocketTranspose && window.PocketTranspose.resume();")
+
+    fun pauseMedia() = evaluate("window.PocketTranspose && window.PocketTranspose.pause && window.PocketTranspose.pause();")
+
+    private fun setPlaying(playing: Boolean) {
+        if (playing == isPlaying) return
+        isPlaying = playing
+        listener.onPlaybackStateChanged(playing)
+    }
 
     fun exitFullscreen() = chromeClient.exitFullscreen()
 
