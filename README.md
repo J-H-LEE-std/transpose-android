@@ -151,6 +151,15 @@ Results below are from the cloud build environment. The debug APK builds, but **
 | Pitch | Audible pitch change, no crackle | Check `pitchEngine` / `pitchError` in Status; if it crackles, check whether it also crackles at Pitch 0 (bypass) |
 | YouTube transition | Re-scan on new video | Strengthen SPA event detection |
 
+## Per-video settings
+
+Transpose, speed and gain are remembered per YouTube video in a local SQLite database (`settings/VideoSettingsStore.kt`, platform `SQLiteOpenHelper`, no extra dependency):
+
+- When the page URL switches to a video (`watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`; parsed by `settings/YouTubeVideoId.kt`), its saved values are loaded and applied, with a short "Loaded saved settings" toast. Videos without saved values start at **transpose 0 · ×1.00 · gain 1.00**.
+- Changes made in the control sheet while a video is open are saved under that video after 0.5 s (and immediately when leaving the video or the app). Values equal to the defaults delete the row, so Reset (or long-pressing each value) forgets a video.
+- "Preserve pitch" stays a global setting. Pages that are not a video keep the current values.
+- All disk I/O runs on one background thread. The database stays on the device and is excluded from cloud backup and device transfer.
+
 ## Background playback
 
 Android WebView pauses hidden `<video>` on its own (mobile Chrome does not), so while media plays in the background the app keeps the WebView's window "visible" **to the engine only** (`PocketWebView.holdWindowVisible`) and at the same time tells the **page** the truth through `PocketTranspose.setAppHidden(true)`: `document.hidden` / `visibilityState` report `hidden`, `hasFocus()` is false, and `visibilitychange` + `blur` fire, also in child frames. The site therefore makes the same decision it makes in a mobile browser. This is only enabled in hook mode with document-start injection (so every frame is told); otherwise the WebView is hidden normally.

@@ -8,6 +8,8 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -20,14 +22,18 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import com.pockettranspose.playback.PlaybackService
 import com.pockettranspose.script.InjectedScriptProvider
+import com.pockettranspose.settings.VideoSettingsStore
+import com.pockettranspose.settings.YouTubeVideoId
 import com.pockettranspose.script.InjectionMode
 import com.pockettranspose.ui.ControlSheet
 import com.pockettranspose.webview.PocketWebView
 import com.pockettranspose.webview.TransposeWebViewController
 import org.json.JSONObject
 import java.util.Locale
+import kotlin.math.roundToInt
 
 class MainActivity : Activity(), TransposeWebViewController.Listener, ControlSheet.Actions {
     private lateinit var webView: PocketWebView
@@ -40,10 +46,16 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     private lateinit var sheet: ControlSheet
     private var notificationPermissionAsked = false
     private var isInForeground = false
+    private lateinit var settingsStore: VideoSettingsStore
+    private val handler = Handler(Looper.getMainLooper())
+    private var currentVideoId: String? = null
+    private var pendingSaveVideoId: String? = null
+    private var loadGeneration = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         webView = PocketWebView(this)
+        settingsStore = VideoSettingsStore(this)
         fullscreenContainer = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             visibility = View.GONE
@@ -88,11 +100,14 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
         // background (the playback foreground service keeps the process alive). The
         // page is told it is hidden and decides itself whether to keep playing.
         isInForeground = false
+        flushPendingSave()
         controller.enterBackground()
         super.onPause()
     }
 
     override fun onDestroy() {
+        flushPendingSave()
+        settingsStore.close()
         PlaybackService.pauseMediaHandler = null
         PlaybackService.stop(this)
         (webView.parent as? ViewGroup)?.removeView(webView)
@@ -104,6 +119,53 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
 
     override fun onUrlChanged(url: String?) {
         if (url != null && !urlInput.hasFocus()) urlInput.setText(url)
+        onVideoChanged(YouTubeVideoId.from(url))
+    }
+
+    // --- Per-video settings (SQLite) ---
+    //
+    // Every YouTube video starts at transpose 0 / x1.00 / gain 1.00 unless settings
+    // were saved for it. User changes are saved (debounced) under the current video.
+
+    private fun onVideoChanged(videoId: String?) {
+        if (videoId == currentVideoId) return
+        flushPendingSave()
+        currentVideoId = videoId
+        if (videoId == null) return
+        val generation = ++loadGeneration
+        settingsStore.load(videoId) { saved ->
+            // A newer video, or a user change made while loading, wins.
+            if (generation != loadGeneration || videoId != currentVideoId) return@load
+            val values = saved ?: VideoSettingsStore.VideoSettings.DEFAULT
+            controller.applyAudioSettings(values.pitchSemitone, values.playbackRate, values.gain)
+            sheet.setValues(
+                values.pitchSemitone,
+                (values.playbackRate * 100).roundToInt(),
+                (values.gain * 100).roundToInt()
+            )
+            if (saved != null) Toast.makeText(this, "Loaded saved settings for this video", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun onUserChangedAudioSettings() {
+        loadGeneration++
+        val videoId = currentVideoId ?: return
+        handler.removeCallbacks(saveRunnable)
+        pendingSaveVideoId = videoId
+        handler.postDelayed(saveRunnable, SAVE_DELAY_MS)
+    }
+
+    private val saveRunnable = Runnable {
+        val videoId = pendingSaveVideoId ?: return@Runnable
+        pendingSaveVideoId = null
+        val s = controller.settings
+        settingsStore.save(videoId, VideoSettingsStore.VideoSettings(s.pitchSemitone, s.playbackRate, s.gain))
+    }
+
+    private fun flushPendingSave() {
+        if (pendingSaveVideoId == null) return
+        handler.removeCallbacks(saveRunnable)
+        saveRunnable.run()
     }
 
     override fun onFullscreenChanged(fullscreen: Boolean) {
@@ -145,9 +207,20 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
 
     // --- ControlSheet.Actions ---
 
-    override fun onPitch(semitone: Int) = controller.setPitchSemitone(semitone)
-    override fun onSpeed(rate: Float) = controller.setPlaybackRate(rate)
-    override fun onGain(gain: Float) = controller.setGain(gain)
+    override fun onPitch(semitone: Int) {
+        controller.setPitchSemitone(semitone)
+        onUserChangedAudioSettings()
+    }
+
+    override fun onSpeed(rate: Float) {
+        controller.setPlaybackRate(rate)
+        onUserChangedAudioSettings()
+    }
+
+    override fun onGain(gain: Float) {
+        controller.setGain(gain)
+        onUserChangedAudioSettings()
+    }
     override fun onPreservesPitch(enabled: Boolean) = controller.setPreservesPitch(enabled)
     override fun onProbeOnly(enabled: Boolean) =
         controller.setMode(if (enabled) InjectionMode.PROBE else InjectionMode.HOOK)
@@ -293,6 +366,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     private companion object {
         const val REQUEST_NOTIFICATIONS = 1
         const val PREF_IDENTIFY_AS_CHROME = "identify_as_chrome"
+        const val SAVE_DELAY_MS = 500L
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

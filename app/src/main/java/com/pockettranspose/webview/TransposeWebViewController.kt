@@ -215,6 +215,12 @@ class TransposeWebViewController(
 
     fun exitFullscreen() = chromeClient.exitFullscreen()
 
+    /** Applies transpose/speed/gain at once (e.g. per-video settings); keeps preservesPitch. */
+    fun applyAudioSettings(pitchSemitone: Int, playbackRate: Float, gain: Float) {
+        settings = settings.copy(pitchSemitone = pitchSemitone, playbackRate = playbackRate, gain = gain)
+        pushSettings()
+    }
+
     fun setGain(value: Float) {
         settings = settings.copy(gain = value)
         evaluate("window.PocketTranspose && window.PocketTranspose.setGain($value);")
