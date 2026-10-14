@@ -339,7 +339,6 @@
     const onStop = () => {
       if (document.hidden) {
         State.lastHiddenPause = pauseSource(media);
-        // The app turns this exact line into a diagnostic notification.
         log('media paused while page hidden', 'by=' + State.lastHiddenPause);
       }
       reportPlayback(anyMediaPlaying());

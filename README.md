@@ -136,6 +136,7 @@ Results below are from the cloud build environment. The debug APK builds, but **
 | 3 | YouTube video transition | New-route logs and media re-hook after selecting another video | Not yet tested on device | Strengthen SPA detection / rescan cadence |
 | 4 | Fullscreen | No crash; playback and controls recover | Not yet tested on device | Adjust custom-view handling |
 | 5 | Background/foreground | Status available; AudioContext resumes | Not yet tested on device | Add more resume triggers |
+| 6 | YouTube background playback (device, author) | Plays in the background only for Premium | **Pass**: Premium account keeps playing with the app in the background or the screen off; a non-Premium session is paused by YouTube itself (`by=page-script`). Navigating back to search inside the page stops playback, as on YouTube mobile web | – |
 
 ## Success/failure decision table
 
@@ -158,7 +159,7 @@ When page media starts playing, the hook logs `[PocketTranspose] playback state 
 
 The page is never told it is visible while the app is in the background. Whether a site keeps playing when hidden is the site's decision: YouTube allows background playback on mobile web only for **YouTube Premium** members ([YouTube Help](https://support.google.com/youtube/answer/7356379)); other HTML5 media normally keeps playing.
 
-When media is paused while the app is in the background, the app also posts a **Playback diagnostics** notification naming the cause (no adb needed), and Status shows it as `lastHiddenPause`. With adb, `adb logcat -s PocketTransposeJS` after pressing Home during playback shows:
+If media is paused while the app is in the background, Status shows the cause as `lastHiddenPause`, and `adb logcat -s PocketTransposeJS` after pressing Home during playback shows:
 
 | Log after going to background | Meaning |
 | --- | --- |

@@ -20,7 +20,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.pockettranspose.playback.PlaybackDiagnostics
 import com.pockettranspose.playback.PlaybackService
 import com.pockettranspose.script.InjectedScriptProvider
 import com.pockettranspose.script.InjectionMode
@@ -123,11 +122,6 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
             PlaybackService.onPaused()
             if (!isInForeground) controller.releaseBackgroundHold()
         }
-    }
-
-    override fun onHiddenPause(source: String) {
-        // The user pressed Pause/Stop themselves: nothing to diagnose.
-        if (source != "app") PlaybackDiagnostics.notifyHiddenPause(this, source, controller.identifyAsChrome)
     }
 
     private fun playbackSummary(): String {
