@@ -15,98 +15,89 @@
   window.__PocketTransposeInstalled = true;
 
   // ---------------------------------------------------------------------------
-  // DSP: two-tap delay-line pitch shifter, written from scratch for this project.
-  // Two read taps sweep through a delay window at (1 - ratio) samples per sample,
-  // so the read head advances at `ratio`. Each tap jumps when its phase wraps; the
-  // jump happens where its sin^2 window is zero, and the windows of the two taps
-  // (half a period apart) always sum to 1. Duration is unchanged, pitch changes.
-  // This function is also stringified into the AudioWorklet module, so it must stay
-  // self-contained.
-  function definePitchShifter() {
-    return class PocketPitchShifter {
-      constructor(sampleRate, channels) {
-        this.windowSize = Math.max(256, Math.round(sampleRate * 0.05));
-        let size = 1;
-        while (size < this.windowSize * 2 + 8) size <<= 1;
-        this.mask = size - 1;
-        this.buffers = [];
-        for (let c = 0; c < channels; c++) this.buffers.push(new Float32Array(size));
-        this.writeIndex = 0;
-        this.phase = 0;
-        this.ratio = 1;
-      }
+  // Pitch shifter built only from native Web Audio nodes (written for this project).
+  //
+  // Two delay taps; each tap's delay sweeps linearly through a 50 ms window at
+  // (1 - ratio) seconds per second, so its read head advances at `ratio` (pitch
+  // changes, duration does not). When a tap's sweep wraps, its sin^2 crossfade
+  // window is at zero; the two taps are half a period apart and their windows
+  // always sum to 1.
+  //
+  // The sweep and window curves come from one looping 4-channel AudioBuffer
+  // (ramp/window for tap A, ramp/window for tap B) that drives DelayNode.delayTime
+  // and GainNode.gain as audio-rate parameters. Everything runs on the audio
+  // rendering thread: no AudioWorklet module (blocked by YouTube's CSP
+  // 'strict-dynamic') and no ScriptProcessorNode (main-thread jank = crackle).
+  const PITCH_WINDOW_SECONDS = 0.05;
 
-      setSemitone(semitone) {
-        const s = Number(semitone);
-        this.ratio = Number.isFinite(s) ? Math.pow(2, s / 12) : 1;
-      }
+  function createNativePitchShifter(ctx) {
+    const W = PITCH_WINDOW_SECONDS;
+    const frames = Math.round(W * ctx.sampleRate);
+    const input = ctx.createGain();
+    const output = ctx.createGain();
+    const splitter = ctx.createChannelSplitter(4);
 
-      read(buffer, position) {
-        const i0 = Math.floor(position);
-        const frac = position - i0;
-        const a = buffer[i0 & this.mask];
-        const b = buffer[(i0 + 1) & this.mask];
-        return a + (b - a) * frac;
-      }
-
-      // inputs/outputs: arrays of Float32Array (one per channel).
-      process(inputs, outputs, frames) {
-        const W = this.windowSize;
-        const step = (1 - this.ratio) / W;
-        const channels = this.buffers.length;
-        for (let i = 0; i < frames; i++) {
-          const w = this.writeIndex;
-          for (let c = 0; c < channels; c++) {
-            const input = inputs[c] || inputs[0];
-            this.buffers[c][w] = input ? input[i] : 0;
-          }
-
-          let p1 = this.phase + step;
-          p1 -= Math.floor(p1);
-          this.phase = p1;
-          let p2 = p1 + 0.5;
-          if (p2 >= 1) p2 -= 1;
-
-          const s1 = Math.sin(Math.PI * p1);
-          const s2 = Math.sin(Math.PI * p2);
-          const g1 = s1 * s1;
-          const g2 = s2 * s2;
-          const pos1 = w - p1 * W;
-          const pos2 = w - p2 * W;
-
-          for (let c = 0; c < outputs.length; c++) {
-            const buffer = this.buffers[Math.min(c, channels - 1)];
-            outputs[c][i] = g1 * this.read(buffer, pos1) + g2 * this.read(buffer, pos2);
-          }
-          this.writeIndex = (w + 1) & this.mask;
+    function buildCurves(falling) {
+      const buffer = ctx.createBuffer(4, frames, ctx.sampleRate);
+      const ch = [0, 1, 2, 3].map((c) => buffer.getChannelData(c));
+      for (let i = 0; i < frames; i++) {
+        let a = i / frames;
+        let b = (a + 0.5) % 1;
+        if (falling) {
+          a = 1 - a;
+          b = 1 - b;
         }
+        const sa = Math.sin(Math.PI * a);
+        const sb = Math.sin(Math.PI * b);
+        ch[0][i] = a;
+        ch[1][i] = sa * sa;
+        ch[2][i] = b;
+        ch[3][i] = sb * sb;
+      }
+      return buffer;
+    }
+    // Pitch up = delay shrinking (falling ramp); pitch down = delay growing.
+    const curves = { up: buildCurves(true), down: buildCurves(false) };
+
+    for (let tap = 0; tap < 2; tap++) {
+      const delay = ctx.createDelay(W * 2);
+      delay.delayTime.value = 0;
+      const depth = ctx.createGain();
+      depth.gain.value = W;
+      const windowGain = ctx.createGain();
+      windowGain.gain.value = 0;
+      splitter.connect(depth, tap * 2);
+      depth.connect(delay.delayTime);
+      splitter.connect(windowGain.gain, tap * 2 + 1);
+      input.connect(delay);
+      delay.connect(windowGain);
+      windowGain.connect(output);
+    }
+
+    let driver = null;
+    let up = null;
+    return {
+      input,
+      output,
+      setSemitone(semitone) {
+        const ratio = Math.pow(2, semitone / 12);
+        const wantUp = ratio > 1;
+        if (!driver || wantUp !== up) {
+          if (driver) {
+            try { driver.stop(); } catch (e) { /* already stopped */ }
+            driver.disconnect();
+          }
+          driver = ctx.createBufferSource();
+          driver.buffer = wantUp ? curves.up : curves.down;
+          driver.loop = true;
+          driver.connect(splitter);
+          driver.start();
+          up = wantUp;
+        }
+        // The curve buffer lasts W seconds, so this rate gives a sweep of |1 - ratio| s/s.
+        driver.playbackRate.value = Math.abs(1 - ratio);
       }
     };
-  }
-
-  const PocketPitchShifter = definePitchShifter();
-  const WORKLET_NAME = 'pocket-transpose-pitch';
-
-  function workletSource() {
-    return [
-      'const PocketPitchShifter = (' + definePitchShifter.toString() + ')();',
-      'class PocketPitchProcessor extends AudioWorkletProcessor {',
-      '  constructor() {',
-      '    super();',
-      '    this.shifter = new PocketPitchShifter(sampleRate, 2);',
-      '    this.port.onmessage = (e) => {',
-      "      if (e.data && typeof e.data.semitone === 'number') this.shifter.setSemitone(e.data.semitone);",
-      '    };',
-      '  }',
-      '  process(inputs, outputs) {',
-      '    const output = outputs[0];',
-      '    if (!output || !output.length) return true;',
-      '    this.shifter.process(inputs[0] || [], output, output[0].length);',
-      '    return true;',
-      '  }',
-      '}',
-      "registerProcessor('" + WORKLET_NAME + "', PocketPitchProcessor);"
-    ].join('\n');
   }
 
   // ---------------------------------------------------------------------------
@@ -116,9 +107,8 @@
     gain: null,
     analyser: null,
     analyserBuffer: null,
-    pitchNode: null,
+    pitch: null,
     pitchEngine: 'none',
-    pitchLoading: null,
     pitchError: null,
     media: null,
     hooked: new WeakSet(),
@@ -187,16 +177,16 @@
     }
   }
 
-  // inputBus -> (pitchNode when pitch != 0 and ready) -> gain
+  // inputBus -> (pitch shifter when pitch != 0) -> gain
   function rewire() {
     if (!State.inputBus || !State.gain) return;
     try {
       State.inputBus.disconnect();
-      if (State.pitchNode) State.pitchNode.disconnect();
+      if (State.pitch) State.pitch.output.disconnect();
       State.inputBus.connect(State.analyser);
-      if (State.settings.pitchSemitone !== 0 && State.pitchNode) {
-        State.inputBus.connect(State.pitchNode);
-        State.pitchNode.connect(State.gain);
+      if (State.settings.pitchSemitone !== 0 && State.pitch) {
+        State.inputBus.connect(State.pitch.input);
+        State.pitch.output.connect(State.gain);
       } else {
         State.inputBus.connect(State.gain);
       }
@@ -205,80 +195,20 @@
     }
   }
 
-  function sendPitchToNode() {
-    const s = State.settings.pitchSemitone;
-    if (!State.pitchNode) return;
-    if (State.pitchEngine === 'audioworklet') State.pitchNode.port.postMessage({ semitone: s });
-    else if (State.pitchNode.__shifter) State.pitchNode.__shifter.setSemitone(s);
-  }
-
-  function createScriptProcessorPitch(ctx) {
-    if (typeof ctx.createScriptProcessor !== 'function') throw new Error('ScriptProcessorNode not available');
-    const node = ctx.createScriptProcessor(2048, 2, 2);
-    const shifter = new PocketPitchShifter(ctx.sampleRate, 2);
-    node.__shifter = shifter;
-    node.onaudioprocess = (event) => {
-      const inBuf = event.inputBuffer;
-      const outBuf = event.outputBuffer;
-      const inputs = [];
-      for (let c = 0; c < inBuf.numberOfChannels; c++) inputs.push(inBuf.getChannelData(c));
-      const outputs = [];
-      for (let c = 0; c < outBuf.numberOfChannels; c++) outputs.push(outBuf.getChannelData(c));
-      shifter.process(inputs, outputs, outBuf.length);
-    };
-    return node;
-  }
-
-  async function createWorkletPitch(ctx) {
-    if (!ctx.audioWorklet || typeof window.AudioWorkletNode !== 'function') {
-      throw new Error('AudioWorklet not available (requires a secure context)');
-    }
-    const url = URL.createObjectURL(new Blob([workletSource()], { type: 'application/javascript' }));
-    try {
-      await ctx.audioWorklet.addModule(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-    return new AudioWorkletNode(ctx, WORKLET_NAME, {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      outputChannelCount: [2]
-    });
-  }
-
-  function ensurePitchNode() {
-    if (State.pitchNode) return Promise.resolve(State.pitchNode);
-    if (State.pitchLoading) return State.pitchLoading;
+  function ensurePitch() {
+    if (State.pitch) return State.pitch;
     const ctx = ensureAudioContext();
-    if (!ctx) return Promise.resolve(null);
-
-    State.pitchLoading = createWorkletPitch(ctx)
-      .then((node) => {
-        State.pitchEngine = 'audioworklet';
-        return node;
-      })
-      .catch((e) => {
-        State.pitchError = safeError(e);
-        log('AudioWorklet pitch failed; trying ScriptProcessorNode', e.name, e.message);
-        const node = createScriptProcessorPitch(ctx);
-        State.pitchEngine = 'scriptprocessor';
-        return node;
-      })
-      .then((node) => {
-        State.pitchNode = node;
-        log('pitch engine ready', State.pitchEngine);
-        return node;
-      })
-      .catch((e) => {
-        State.pitchEngine = 'unavailable';
-        State.pitchError = safeError(e);
-        log('pitch engine unavailable', e.name, e.message);
-        return null;
-      })
-      .finally(() => {
-        State.pitchLoading = null;
-      });
-    return State.pitchLoading;
+    if (!ctx) return null;
+    try {
+      State.pitch = createNativePitchShifter(ctx);
+      State.pitchEngine = 'native-nodes';
+      log('pitch engine ready', State.pitchEngine);
+    } catch (e) {
+      State.pitchEngine = 'unavailable';
+      State.pitchError = safeError(e);
+      log('pitch engine unavailable', e.name, e.message);
+    }
+    return State.pitch;
   }
 
   function applyMediaSettings(media) {
@@ -456,10 +386,9 @@
         rewire();
         return;
       }
-      ensurePitchNode().then(() => {
-        sendPitchToNode();
-        rewire();
-      });
+      const pitch = ensurePitch();
+      if (pitch) pitch.setSemitone(State.settings.pitchSemitone);
+      rewire();
     },
     applySettings(settings) {
       if (!settings) return;

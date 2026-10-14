@@ -1,6 +1,5 @@
 package com.pockettranspose.webview
 
-import android.app.Activity
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -10,14 +9,12 @@ import android.webkit.WebView
 import com.pockettranspose.BuildConfig
 
 class PocketWebChromeClient(
-    private val activity: Activity,
     private val fullscreenContainer: ViewGroup,
     private val onFullscreenChanged: (Boolean) -> Unit,
     private val onLoadComplete: (WebView) -> Unit
 ) : WebChromeClient() {
     private var fullscreenView: View? = null
     private var fullscreenCallback: CustomViewCallback? = null
-    private var savedSystemUiVisibility = 0
 
     val isFullscreen: Boolean get() = fullscreenView != null
 
@@ -36,7 +33,7 @@ class PocketWebChromeClient(
         if (newProgress == 100) onLoadComplete(view)
     }
 
-    @Suppress("DEPRECATION")
+    // System bars are hidden/restored by the activity via onFullscreenChanged.
     override fun onShowCustomView(view: View, callback: CustomViewCallback) {
         if (fullscreenView != null) {
             callback.onCustomViewHidden()
@@ -49,12 +46,6 @@ class PocketWebChromeClient(
             ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
         fullscreenContainer.visibility = View.VISIBLE
-        val decor = activity.window.decorView
-        savedSystemUiVisibility = decor.systemUiVisibility
-        decor.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
-            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         onFullscreenChanged(true)
     }
 
@@ -69,12 +60,10 @@ class PocketWebChromeClient(
         callback?.onCustomViewHidden()
     }
 
-    @Suppress("DEPRECATION")
     private fun hideFullscreenView() {
         val view = fullscreenView ?: return
         fullscreenContainer.removeView(view)
         fullscreenContainer.visibility = View.GONE
-        activity.window.decorView.systemUiVisibility = savedSystemUiVisibility
         fullscreenView = null
         fullscreenCallback = null
         onFullscreenChanged(false)

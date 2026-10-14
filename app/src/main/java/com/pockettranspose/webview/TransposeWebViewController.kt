@@ -50,7 +50,6 @@ class TransposeWebViewController(
     private var documentStartHandler: ScriptHandler? = null
 
     private val chromeClient = PocketWebChromeClient(
-        activity,
         fullscreenContainer,
         onFullscreenChanged = { listener.onFullscreenChanged(it) },
         onLoadComplete = { injectFallback(it) }
