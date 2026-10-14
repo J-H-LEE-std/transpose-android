@@ -1,11 +1,29 @@
 package com.pockettranspose.webview
 
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewAssetLoader
 
-class PocketWebViewClient(private val reinject: (WebView) -> Unit) : WebViewClient() {
+class PocketWebViewClient(
+    private val assetLoader: WebViewAssetLoader,
+    private val onPageFinished: (WebView) -> Unit,
+    private val onUrlChanged: (String?) -> Unit
+) : WebViewClient() {
+    // Serves app assets (the HTML5 test page) from https://appassets.androidplatform.net,
+    // which is a secure context, so AudioWorklet is available there too.
+    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+        assetLoader.shouldInterceptRequest(request.url)
+
     override fun onPageFinished(view: WebView, url: String?) {
         super.onPageFinished(view, url)
-        reinject(view)
+        onPageFinished(view)
+    }
+
+    // Also fires for SPA (History API) navigations, e.g. YouTube video changes.
+    override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+        super.doUpdateVisitedHistory(view, url, isReload)
+        onUrlChanged(url)
     }
 }
