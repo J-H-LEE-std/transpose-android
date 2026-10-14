@@ -6,7 +6,9 @@ import android.util.Log
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.webkit.ScriptHandler
+import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.pockettranspose.BuildConfig
@@ -22,7 +24,7 @@ import org.json.JSONArray
  */
 class TransposeWebViewController(
     private val activity: Activity,
-    private val webView: WebView,
+    private val webView: PocketWebView,
     private val scriptProvider: InjectedScriptProvider,
     fullscreenContainer: ViewGroup,
     private val listener: Listener
@@ -31,6 +33,7 @@ class TransposeWebViewController(
         fun onUrlChanged(url: String?)
         fun onFullscreenChanged(fullscreen: Boolean)
         fun onStatus(statusJson: String)
+        fun onPlaybackStateChanged(playing: Boolean)
     }
 
     data class AudioSettings(
@@ -48,12 +51,22 @@ class TransposeWebViewController(
         private set
 
     private var documentStartHandler: ScriptHandler? = null
+    private var defaultUserAgent: String? = null
+    private var defaultUserAgentMetadata: UserAgentMetadata? = null
+
+    var identifyAsChrome = false
+        private set
 
     private val chromeClient = PocketWebChromeClient(
         fullscreenContainer,
         onFullscreenChanged = { listener.onFullscreenChanged(it) },
-        onLoadComplete = { injectFallback(it) }
+        onLoadComplete = { injectFallback(it) },
+        onPlaybackStateChanged = { setPlaying(it) }
     )
+
+    /** Whether page media is playing, as reported by the hook script. */
+    var isPlaying = false
+        private set
 
     val isFullscreen: Boolean get() = chromeClient.isFullscreen
 
@@ -76,6 +89,8 @@ class TransposeWebViewController(
         webView.webChromeClient = chromeClient
         webView.webViewClient = PocketWebViewClient(
             assetLoader,
+            // A full navigation tears down the page and its media.
+            onPageStarted = { setPlaying(false) },
             onPageFinished = {
                 injectFallback(it)
                 pushSettings()
@@ -96,6 +111,47 @@ class TransposeWebViewController(
 
     fun loadTestPage() = webView.loadUrl(TEST_PAGE_URL)
 
+    /**
+     * Presents this WebView as mobile Chrome: drops the "; wv" / "Version/x" tokens
+     * from the User-Agent and renames the "Android WebView" client-hint brand.
+     * For sites that offer a feature to mobile browsers but not to WebViews, such as
+     * YouTube Premium background playback. It does not change what an account is
+     * entitled to. Off by default.
+     */
+    fun setIdentifyAsChrome(enabled: Boolean, reload: Boolean) {
+        val settings = webView.settings
+        if (defaultUserAgent == null) {
+            defaultUserAgent = settings.userAgentString
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+                defaultUserAgentMetadata = WebSettingsCompat.getUserAgentMetadata(settings)
+            }
+        }
+        identifyAsChrome = enabled
+        val baseAgent = defaultUserAgent.orEmpty()
+        settings.userAgentString = if (enabled) chromeUserAgent(baseAgent) else baseAgent
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+            defaultUserAgentMetadata?.let { metadata ->
+                WebSettingsCompat.setUserAgentMetadata(settings, if (enabled) chromeMetadata(metadata) else metadata)
+            }
+        }
+        Log.d(LOG_TAG, "identify as Chrome: $enabled")
+        if (reload) webView.reload()
+    }
+
+    private fun chromeUserAgent(agent: String): String =
+        agent.replace("; wv)", ")").replace(Regex("Version/\\S+ "), "")
+
+    private fun chromeMetadata(metadata: UserAgentMetadata): UserAgentMetadata {
+        val brands = metadata.brandVersionList.map { brand ->
+            if (brand.brand == "Android WebView") {
+                UserAgentMetadata.BrandVersion.Builder(brand).setBrand("Google Chrome").build()
+            } else {
+                brand
+            }
+        }
+        return UserAgentMetadata.Builder(metadata).setBrandVersionList(brands).build()
+    }
+
     /** Switches between the probe and hook scripts; takes effect after a reload. */
     fun setMode(newMode: InjectionMode) {
         if (newMode == mode) return
@@ -112,6 +168,50 @@ class TransposeWebViewController(
     }
 
     fun onHostResumed() = evaluate("window.PocketTranspose && window.PocketTranspose.resume();")
+
+    fun pauseMedia() = evaluate("window.PocketTranspose && window.PocketTranspose.pause && window.PocketTranspose.pause();")
+
+    /**
+     * App -> background while media plays: keep the engine from pausing hidden video
+     * (WebView-only behaviour) while telling the page the truth via setAppHidden, so
+     * the site decides as it would in a mobile browser (YouTube: Premium only).
+     *
+     * Only used when every frame is guaranteed to run the hook (hook mode with
+     * document-start injection), so no frame is left believing it is visible. If
+     * the page cannot be told, the held-back hidden state is released at once.
+     */
+    fun enterBackground() {
+        if (!isPlaying || mode != InjectionMode.HOOK || !documentStartSupported) {
+            webView.onPause()
+            return
+        }
+        webView.holdWindowVisible = true
+        evaluate(
+            "window.PocketTranspose && window.PocketTranspose.setAppHidden ? window.PocketTranspose.setAppHidden(true) : false"
+        ) { result ->
+            if (result != "true") {
+                Log.d(LOG_TAG, "page could not be told it is hidden; letting WebView hide it")
+                webView.holdWindowVisible = false
+            }
+        }
+    }
+
+    fun enterForeground() {
+        webView.holdWindowVisible = false
+        webView.onResume()
+        evaluate("window.PocketTranspose && window.PocketTranspose.setAppHidden && window.PocketTranspose.setAppHidden(false);")
+    }
+
+    /** Playback stopped while in the background: let the engine really hide the page. */
+    fun releaseBackgroundHold() {
+        webView.holdWindowVisible = false
+    }
+
+    private fun setPlaying(playing: Boolean) {
+        if (playing == isPlaying) return
+        isPlaying = playing
+        listener.onPlaybackStateChanged(playing)
+    }
 
     fun exitFullscreen() = chromeClient.exitFullscreen()
 

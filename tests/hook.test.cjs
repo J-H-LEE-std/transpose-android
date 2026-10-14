@@ -81,20 +81,23 @@ function fakeMedia(overrides = {}) {
     crossOrigin: null,
     playbackRate: 1,
     preservesPitch: true,
-    addEventListener() {},
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+    fire(type) { (this.listeners[type] || []).forEach((fn) => fn()); },
+    pause() { this.paused = true; this.fire('pause'); },
     ...overrides
   };
 }
 
-function load(code) {
+function load(code, windowExtras = {}, documentOverride = null) {
   let media = [];
   const timeouts = [];
   const intervals = [];
   const logs = [];
-  const window = { addEventListener() {}, AudioContext: FakeAudioContext };
+  const window = { addEventListener() {}, AudioContext: FakeAudioContext, ...windowExtras };
   const context = vm.createContext({
     window,
-    document: {
+    document: documentOverride || {
       documentElement: {},
       hidden: false,
       addEventListener() {},
@@ -105,6 +108,7 @@ function load(code) {
     history: { pushState() {}, replaceState() {} },
     console: { log: (...args) => logs.push(args.join(' ')) },
     MutationObserver: class { observe() {} },
+    Event: class { constructor(type) { this.type = type; } },
     setTimeout: (fn) => { timeouts.push(fn); return timeouts.length; },
     setInterval: (fn) => { intervals.push(fn); return intervals.length; }
   });
@@ -119,6 +123,9 @@ function load(code) {
     flushTimeouts: () => { while (timeouts.length) timeouts.shift()(); },
     rerun: run,
     location: context.location,
+    document: context.document,
+    setMediaGetter: (fn) => { media = fn; },
+    mediaRef: () => media,
     logs
   };
 }
@@ -259,4 +266,113 @@ test('probe finds media without touching Web Audio', () => {
   assert.equal(h.status().mode, 'probe');
   assert.equal(h.status().hasMedia, true);
   assert.equal(h.logs.some((l) => l.includes('secret')), false);
+});
+
+test('playback state is reported once per change for the app foreground service', () => {
+  const h = load(HOOK);
+  const media = fakeMedia({ paused: true });
+  h.setMedia([media]);
+  h.scan();
+  const states = () => h.logs.filter((l) => l.includes('playback state'));
+  assert.equal(states().length, 0);
+
+  media.paused = false;
+  media.fire('play');
+  media.fire('playing');
+  assert.deepEqual(states(), ['[PocketTranspose] playback state playing']);
+  assert.equal(h.status().playing, true);
+
+  h.api().pause();
+  assert.equal(media.paused, true);
+  assert.deepEqual(states().at(-1), '[PocketTranspose] playback state paused');
+  assert.equal(h.status().playing, false);
+});
+
+test('pausing one element does not report paused while another still plays', () => {
+  const h = load(HOOK);
+  const a = fakeMedia();
+  const b = fakeMedia();
+  h.setMedia([a, b]);
+  h.scan();
+  a.paused = true;
+  a.fire('pause');
+  assert.equal(h.status().playing, true);
+  assert.equal(h.logs.some((l) => l.includes('playback state paused')), false);
+});
+
+test('pause source is attributed when the page is hidden', () => {
+  // Fake prototype so the hook can wrap pause() like HTMLMediaElement.prototype.pause.
+  class FakeMediaElement {
+    pause() { this.paused = true; this.fire('pause'); }
+  }
+  const h = load(HOOK, { HTMLMediaElement: FakeMediaElement });
+  const make = () => Object.assign(Object.create(FakeMediaElement.prototype), fakeMedia(), {
+    pause: FakeMediaElement.prototype.pause
+  });
+  const byPage = make();
+  h.setMedia([byPage]);
+  h.scan();
+  h.document.hidden = true;
+  FakeMediaElement.prototype.pause.call(byPage);
+  assert.ok(h.logs.some((l) => l.includes('media paused while page hidden by=page-script')), h.logs.join('\n'));
+  assert.equal(h.status().lastHiddenPause, 'page-script');
+
+  const byBrowser = make();
+  h.setMedia([byBrowser]);
+  h.scan();
+  byBrowser.paused = true;
+  byBrowser.fire('pause');
+  assert.ok(h.logs.some((l) => l.includes('by=browser')));
+
+  const byApp = make();
+  byApp.paused = false;
+  h.setMedia([byApp]);
+  h.scan();
+  h.api().pause();
+  assert.ok(h.logs.some((l) => l.includes('by=app')));
+});
+
+test('setAppHidden reports the truthful hidden state to the page and child frames', () => {
+  // Fake Document whose real visibility (from the engine) stays "visible".
+  class FakeDocument {
+    get hidden() { return false; }
+    get visibilityState() { return 'visible'; }
+  }
+  const events = [];
+  const doc = Object.assign(Object.create(FakeDocument.prototype), {
+    documentElement: {},
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+    dispatchEvent(event) { events.push('document:' + event.type); (this.listeners[event.type] || []).forEach((fn) => fn(event)); },
+    hasFocus() { return true; },
+    querySelector: () => null,
+    querySelectorAll: () => []
+  });
+  const posted = [];
+  const childFrame = { postMessage: (data) => posted.push(data) };
+  const h = load(HOOK, {
+    Document: FakeDocument,
+    frames: [childFrame],
+    dispatchEvent: (event) => events.push('window:' + event.type)
+  }, doc);
+
+  assert.equal(h.status().visibilityOverrideInstalled, true);
+  assert.equal(h.api().setAppHidden(true), true);
+  assert.equal(doc.hidden, true);
+  assert.equal(doc.visibilityState, 'hidden');
+  assert.equal(doc.hasFocus(), false);
+  assert.deepEqual(events, ['document:visibilitychange', 'window:blur']);
+  assert.equal(JSON.stringify(posted), JSON.stringify([{ __pocketTransposeAppHidden: true }]));
+  assert.ok(h.logs.some((l) => l.includes('page hidden')));
+
+  assert.equal(h.api().setAppHidden(false), true);
+  assert.equal(doc.hidden, false);
+  assert.equal(doc.visibilityState, 'visible');
+  assert.deepEqual(events.slice(2), ['document:visibilitychange', 'window:focus']);
+});
+
+test('setAppHidden returns false when visibility cannot be overridden', () => {
+  const h = load(HOOK);
+  assert.equal(h.status().visibilityOverrideInstalled, false);
+  assert.equal(h.api().setAppHidden(true), false);
 });

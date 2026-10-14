@@ -112,6 +112,8 @@ Play a video, enter fullscreen, rotate, then exit with the back button or the pl
 
 ### Test 5 – background / foreground
 
+See **Background playback** below for the expected logs.
+
 Play, press Home, return to the app, tap **Status**. `audioContextState` should be `running` (the app calls `PocketTranspose.resume()` in `onResume`).
 
 ### Hook vs. probe comparison
@@ -134,6 +136,7 @@ Results below are from the cloud build environment. The debug APK builds, but **
 | 3 | YouTube video transition | New-route logs and media re-hook after selecting another video | Not yet tested on device | Strengthen SPA detection / rescan cadence |
 | 4 | Fullscreen | No crash; playback and controls recover | Not yet tested on device | Adjust custom-view handling |
 | 5 | Background/foreground | Status available; AudioContext resumes | Not yet tested on device | Add more resume triggers |
+| 6 | YouTube background playback (device, author) | Plays in the background only for Premium | **Pass**: Premium account keeps playing with the app in the background or the screen off; a non-Premium session is paused by YouTube itself (`by=page-script`). Navigating back to search inside the page stops playback, as on YouTube mobile web | – |
 
 ## Success/failure decision table
 
@@ -147,6 +150,26 @@ Results below are from the cloud build environment. The debug APK builds, but **
 | Speed | Playback speed changes | Check `mediaPlaybackRate` in Status (YouTube may override it) |
 | Pitch | Audible pitch change, no crackle | Check `pitchEngine` / `pitchError` in Status; if it crackles, check whether it also crackles at Pitch 0 (bypass) |
 | YouTube transition | Re-scan on new video | Strengthen SPA event detection |
+
+## Background playback
+
+Android WebView pauses hidden `<video>` on its own (mobile Chrome does not), so while media plays in the background the app keeps the WebView's window "visible" **to the engine only** (`PocketWebView.holdWindowVisible`) and at the same time tells the **page** the truth through `PocketTranspose.setAppHidden(true)`: `document.hidden` / `visibilityState` report `hidden`, `hasFocus()` is false, and `visibilitychange` + `blur` fire, also in child frames. The site therefore makes the same decision it makes in a mobile browser. This is only enabled in hook mode with document-start injection (so every frame is told); otherwise the WebView is hidden normally.
+
+When page media starts playing, the hook logs `[PocketTranspose] playback state playing`; the app reads that line through the existing console bridge (no `addJavascriptInterface`) and starts a `mediaPlayback` foreground service with a notification (Pause / Stop). While media plays, leaving the app does not pause the WebView, and the service keeps the process and WebView renderer from being frozen or killed. After a pause the service lingers 5 minutes (so a playlist can advance without a background restart, which Android 12+ forbids) and then stops.
+
+The page is never told it is visible while the app is in the background. Whether a site keeps playing when hidden is the site's decision: YouTube allows background playback on mobile web only for **YouTube Premium** members ([YouTube Help](https://support.google.com/youtube/answer/7356379)); other HTML5 media normally keeps playing.
+
+If media is paused while the app is in the background, Status shows the cause as `lastHiddenPause`, and `adb logcat -s PocketTransposeJS` after pressing Home during playback shows:
+
+| Log after going to background | Meaning |
+| --- | --- |
+| `page hidden mediaPlaying=true`, then nothing | Playing in the background (expected) |
+| `media paused while page hidden by=page-script` | The page's own script paused it. For YouTube with Premium: YouTube did not treat this WebView as a mobile browser; try **Identify as Chrome** (below) |
+| `media paused while page hidden by=browser` | WebView paused the hidden media itself (no script `pause()` call) |
+| `media paused while page hidden by=app` | The notification's Pause/Stop was used |
+| `playback service not started: ForegroundServiceStartNotAllowedException` | Playback started while the app was already in the background; open the app once while playing |
+
+**Identify as Chrome** (control sheet, off by default, persisted, reloads the page) removes the `; wv` and `Version/x` tokens from the User-Agent and renames the `Android WebView` client-hint brand to `Google Chrome`, so sites see a mobile Chrome browser. It exists for YouTube Premium background playback, which YouTube may only offer to mobile browsers; it does not change what an account is entitled to (non-Premium accounts still get YouTube's normal pause-when-hidden behaviour). Note that Google discourages signing in to Google accounts inside embedded WebViews.
 
 ## Known limitations / risks
 

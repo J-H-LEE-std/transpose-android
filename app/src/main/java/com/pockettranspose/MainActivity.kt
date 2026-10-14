@@ -1,7 +1,9 @@
 package com.pockettranspose
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
@@ -14,19 +16,21 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.webkit.WebView
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.pockettranspose.playback.PlaybackService
 import com.pockettranspose.script.InjectedScriptProvider
 import com.pockettranspose.script.InjectionMode
 import com.pockettranspose.ui.ControlSheet
+import com.pockettranspose.webview.PocketWebView
 import com.pockettranspose.webview.TransposeWebViewController
 import org.json.JSONObject
+import java.util.Locale
 
 class MainActivity : Activity(), TransposeWebViewController.Listener, ControlSheet.Actions {
-    private lateinit var webView: WebView
+    private lateinit var webView: PocketWebView
     private lateinit var controller: TransposeWebViewController
     private lateinit var root: FrameLayout
     private lateinit var contentLayout: LinearLayout
@@ -34,10 +38,12 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     private lateinit var fullscreenContainer: FrameLayout
     private lateinit var urlInput: EditText
     private lateinit var sheet: ControlSheet
+    private var notificationPermissionAsked = false
+    private var isInForeground = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        webView = WebView(this)
+        webView = PocketWebView(this)
         fullscreenContainer = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             visibility = View.GONE
@@ -46,6 +52,8 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
             this, webView, InjectedScriptProvider(this), fullscreenContainer, this
         )
         controller.configure()
+        controller.setIdentifyAsChrome(prefs().getBoolean(PREF_IDENTIFY_AS_CHROME, false), reload = false)
+        PlaybackService.pauseMediaHandler = { controller.pauseMedia() }
         layOutEdgeToEdge()
         setContentView(buildLayout())
         if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) controller.loadYouTube()
@@ -69,17 +77,24 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
 
     override fun onResume() {
         super.onResume()
-        webView.onResume()
+        isInForeground = true
+        controller.enterForeground()
         // Background -> foreground: give the AudioContext a chance to resume.
         controller.onHostResumed()
     }
 
     override fun onPause() {
-        webView.onPause()
+        // While media plays, keep the WebView running so playback can continue in the
+        // background (the playback foreground service keeps the process alive). The
+        // page is told it is hidden and decides itself whether to keep playing.
+        isInForeground = false
+        controller.enterBackground()
         super.onPause()
     }
 
     override fun onDestroy() {
+        PlaybackService.pauseMediaHandler = null
+        PlaybackService.stop(this)
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
         super.onDestroy()
@@ -99,6 +114,31 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
         root.requestApplyInsets()
     }
 
+    override fun onPlaybackStateChanged(playing: Boolean) {
+        if (playing) {
+            requestNotificationPermissionOnce()
+            PlaybackService.onPlaying(this, playbackSummary())
+        } else {
+            PlaybackService.onPaused()
+            if (!isInForeground) controller.releaseBackgroundHold()
+        }
+    }
+
+    private fun playbackSummary(): String {
+        val s = controller.settings
+        return "Transpose %+d · %.2fx · gain %.2f".format(Locale.US, s.pitchSemitone, s.playbackRate, s.gain)
+    }
+
+    // Android 13+: the playback notification needs POST_NOTIFICATIONS. Playback works
+    // without it; the notification just stays hidden. Ask once, on first playback.
+    private fun requestNotificationPermissionOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || notificationPermissionAsked) return
+        notificationPermissionAsked = true
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+        }
+    }
+
     override fun onStatus(statusJson: String) {
         sheet.showStatus(runCatching { JSONObject(statusJson).toString(2) }.getOrDefault(statusJson))
     }
@@ -111,6 +151,13 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     override fun onPreservesPitch(enabled: Boolean) = controller.setPreservesPitch(enabled)
     override fun onProbeOnly(enabled: Boolean) =
         controller.setMode(if (enabled) InjectionMode.PROBE else InjectionMode.HOOK)
+    override fun onIdentifyAsChrome(enabled: Boolean) {
+        prefs().edit().putBoolean(PREF_IDENTIFY_AS_CHROME, enabled).apply()
+        controller.setIdentifyAsChrome(enabled, reload = true)
+    }
+
+    private fun prefs() = getSharedPreferences("settings", Context.MODE_PRIVATE)
+
     override fun onYouTube() = controller.loadYouTube()
     override fun onTestPage() = controller.loadTestPage()
     override fun onReinject() = controller.reinject()
@@ -172,7 +219,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     // --- Layout (programmatic, no extra UI dependencies) ---
 
     private fun buildLayout(): View {
-        sheet = ControlSheet(this, this)
+        sheet = ControlSheet(this, this, controller.identifyAsChrome)
         handleSpacer = View(this)
         contentLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -241,6 +288,11 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
         urlInput.clearFocus()
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
             .hideSoftInputFromWindow(urlInput.windowToken, 0)
+    }
+
+    private companion object {
+        const val REQUEST_NOTIFICATIONS = 1
+        const val PREF_IDENTIFY_AS_CHROME = "identify_as_chrome"
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

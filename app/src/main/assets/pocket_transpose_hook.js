@@ -116,6 +116,8 @@
     hookedCount: 0,
     lastError: null,
     lastHref: location.href,
+    playing: null,
+    lastHiddenPause: null,
     routeChanges: 0,
     silenceWarned: false,
     observer: null,
@@ -228,14 +230,128 @@
     }
   }
 
+  // The app parses these exact lines (console bridge, no JS interface) to keep a
+  // media-playback foreground service running while something plays.
+  function reportPlayback(playing) {
+    if (State.playing === playing) return;
+    State.playing = playing;
+    log('playback state', playing ? 'playing' : 'paused');
+  }
+
+  function anyMediaPlaying() {
+    return Array.prototype.slice.call(document.querySelectorAll('video, audio'))
+      .some((m) => !m.paused && !m.ended);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Truthful page visibility while the app keeps the WebView engine "visible".
+  //
+  // Android WebView pauses hidden <video> itself (by=browser), which mobile Chrome
+  // does not. During background playback the app therefore keeps the WebView's
+  // window visible to the engine, and this override tells the page the truth
+  // instead: document.hidden / visibilityState report "hidden" and the usual
+  // visibilitychange + blur events fire. The site then makes its own decision
+  // exactly as in a mobile browser (YouTube: keeps playing only for Premium).
+  let appHidden = false;
+  const visibilityOverrideInstalled = (function installVisibilityOverride() {
+    try {
+      const proto = window.Document && window.Document.prototype;
+      const hidden = proto && Object.getOwnPropertyDescriptor(proto, 'hidden');
+      const state = proto && Object.getOwnPropertyDescriptor(proto, 'visibilityState');
+      if (!hidden || !hidden.get || !state || !state.get) return false;
+      const define = (name, get) => Object.defineProperty(document, name, { configurable: true, get });
+      define('hidden', function () { return appHidden || hidden.get.call(this); });
+      define('visibilityState', function () { return appHidden ? 'hidden' : state.get.call(this); });
+      const webkitHidden = Object.getOwnPropertyDescriptor(proto, 'webkitHidden');
+      if (webkitHidden && webkitHidden.get) {
+        define('webkitHidden', function () { return appHidden || webkitHidden.get.call(this); });
+      }
+      const webkitState = Object.getOwnPropertyDescriptor(proto, 'webkitVisibilityState');
+      if (webkitState && webkitState.get) {
+        define('webkitVisibilityState', function () { return appHidden ? 'hidden' : webkitState.get.call(this); });
+      }
+      const hasFocus = document.hasFocus;
+      if (typeof hasFocus === 'function') {
+        document.hasFocus = function () { return !appHidden && hasFocus.call(this); };
+      }
+      return true;
+    } catch (e) {
+      log('visibility override failed', e.name, e.message);
+      return false;
+    }
+  })();
+
+  // Applies the app's background state here and forwards it to child frames
+  // (embedded players), which run their own copy of this script.
+  function applyAppHidden(hidden) {
+    if (!visibilityOverrideInstalled) return false;
+    if (appHidden !== hidden) {
+      appHidden = hidden;
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event(hidden ? 'blur' : 'focus'));
+    }
+    const frames = window.frames;
+    for (let i = 0; i < (frames ? frames.length : 0); i++) {
+      try {
+        frames[i].postMessage({ __pocketTransposeAppHidden: hidden }, '*');
+      } catch (e) { /* frame gone */ }
+    }
+    return true;
+  }
+
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (event.source !== window.parent || window.parent === window) return;
+    if (data && typeof data.__pocketTransposeAppHidden === 'boolean') applyAppHidden(data.__pocketTransposeAppHidden);
+  });
+
+  // Diagnostics: was a pause requested by page script (e.g. YouTube's player), by
+  // this app (PocketTranspose.pause), or done by the browser itself (no pause() call)?
+  const PAUSE_CALL_WINDOW_MS = 1000;
+  let appPauseInProgress = false;
+  (function wrapPause() {
+    const proto = window.HTMLMediaElement && window.HTMLMediaElement.prototype;
+    if (!proto || typeof proto.pause !== 'function' || proto.pause.__PocketTransposeWrapped) return;
+    const original = proto.pause;
+    const wrapped = function (...args) {
+      try {
+        this.__PocketTransposePauseCall = { at: Date.now(), byApp: appPauseInProgress };
+      } catch (e) { /* non-extensible element: diagnostics only */ }
+      return original.apply(this, args);
+    };
+    wrapped.__PocketTransposeWrapped = true;
+    proto.pause = wrapped;
+  })();
+
+  function pauseSource(media) {
+    const call = media.__PocketTransposePauseCall;
+    if (!call || Date.now() - call.at > PAUSE_CALL_WINDOW_MS) return 'browser';
+    return call.byApp ? 'app' : 'page-script';
+  }
+
   function listenMedia(media) {
     if (State.listened.has(media)) return;
     State.listened.add(media);
-    media.addEventListener('play', resumeContext);
-    media.addEventListener('playing', resumeContext);
+    const onPlay = () => {
+      resumeContext();
+      reportPlayback(true);
+    };
+    const onStop = () => {
+      if (document.hidden) {
+        State.lastHiddenPause = pauseSource(media);
+        log('media paused while page hidden', 'by=' + State.lastHiddenPause);
+      }
+      reportPlayback(anyMediaPlaying());
+    };
+    media.addEventListener('play', onPlay);
+    media.addEventListener('playing', onPlay);
+    media.addEventListener('pause', onStop);
+    media.addEventListener('ended', onStop);
+    media.addEventListener('emptied', onStop);
     media.addEventListener('loadedmetadata', () => {
       if (media === State.media) applyMediaSettings(media);
     });
+    if (!media.paused && !media.ended) reportPlayback(true);
   }
 
   function hookMedia(media) {
@@ -369,6 +485,23 @@
     resume() {
       resumeContext();
     },
+    // Called by the app when it goes to / returns from the background. Returns
+    // false when the page cannot be told (the app then lets the engine hide it).
+    setAppHidden(hidden) {
+      const ok = applyAppHidden(!!hidden);
+      log('app hidden', !!hidden, ok ? '' : '(visibility override unavailable)');
+      return ok;
+    },
+    pause() {
+      appPauseInProgress = true;
+      try {
+        Array.prototype.slice.call(document.querySelectorAll('video, audio')).forEach((m) => {
+          if (!m.paused) m.pause();
+        });
+      } finally {
+        appPauseInProgress = false;
+      }
+    },
     setGain(value) {
       State.settings.gain = clamp(value, 0, 4, 1);
       if (State.gain) State.gain.gain.value = State.settings.gain;
@@ -425,6 +558,10 @@
         pitchError: State.pitchError,
         lastError: State.lastError,
         routeChanges: State.routeChanges,
+        playing: !!State.playing,
+        lastHiddenPause: State.lastHiddenPause,
+        appHidden,
+        visibilityOverrideInstalled,
         settings: Object.assign({}, State.settings)
       };
     }
@@ -438,7 +575,10 @@
   // Any user gesture is a chance to leave the "suspended" autoplay state.
   window.addEventListener('pointerdown', resumeContext, true);
   window.addEventListener('touchend', resumeContext, true);
+  // Diagnostics for background playback: tells "the page paused itself when hidden"
+  // apart from "the app/OS stopped playback".
   document.addEventListener('visibilitychange', () => {
+    log(document.hidden ? 'page hidden' : 'page visible', 'mediaPlaying=' + anyMediaPlaying());
     if (!document.hidden) resumeContext();
   });
 
