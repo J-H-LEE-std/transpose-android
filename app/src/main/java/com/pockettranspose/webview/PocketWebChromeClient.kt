@@ -12,7 +12,8 @@ class PocketWebChromeClient(
     private val fullscreenContainer: ViewGroup,
     private val onFullscreenChanged: (Boolean) -> Unit,
     private val onLoadComplete: (WebView) -> Unit,
-    private val onPlaybackStateChanged: (Boolean) -> Unit
+    private val onPlaybackStateChanged: (Boolean) -> Unit,
+    private val onHiddenPause: (String) -> Unit
 ) : WebChromeClient() {
     private var fullscreenView: View? = null
     private var fullscreenCallback: CustomViewCallback? = null
@@ -26,9 +27,10 @@ class PocketWebChromeClient(
         if (message.startsWith(JS_LOG_PREFIX) || BuildConfig.DEBUG) {
             Log.d(LOG_TAG, "$message (line ${consoleMessage.lineNumber()})")
         }
-        when (message) {
-            PLAYBACK_PLAYING -> onPlaybackStateChanged(true)
-            PLAYBACK_PAUSED -> onPlaybackStateChanged(false)
+        when {
+            message == PLAYBACK_PLAYING -> onPlaybackStateChanged(true)
+            message == PLAYBACK_PAUSED -> onPlaybackStateChanged(false)
+            message.startsWith(HIDDEN_PAUSE_PREFIX) -> onHiddenPause(message.removePrefix(HIDDEN_PAUSE_PREFIX).trim())
         }
         return true
     }
@@ -82,5 +84,6 @@ class PocketWebChromeClient(
         // same line; the worst it can do is start/stop our playback service.
         private const val PLAYBACK_PLAYING = "$JS_LOG_PREFIX playback state playing"
         private const val PLAYBACK_PAUSED = "$JS_LOG_PREFIX playback state paused"
+        private const val HIDDEN_PAUSE_PREFIX = "$JS_LOG_PREFIX media paused while page hidden by="
     }
 }

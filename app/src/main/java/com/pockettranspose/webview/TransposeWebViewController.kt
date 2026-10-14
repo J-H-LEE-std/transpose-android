@@ -34,6 +34,7 @@ class TransposeWebViewController(
         fun onFullscreenChanged(fullscreen: Boolean)
         fun onStatus(statusJson: String)
         fun onPlaybackStateChanged(playing: Boolean)
+        fun onHiddenPause(source: String)
     }
 
     data class AudioSettings(
@@ -61,7 +62,8 @@ class TransposeWebViewController(
         fullscreenContainer,
         onFullscreenChanged = { listener.onFullscreenChanged(it) },
         onLoadComplete = { injectFallback(it) },
-        onPlaybackStateChanged = { setPlaying(it) }
+        onPlaybackStateChanged = { setPlaying(it) },
+        onHiddenPause = { listener.onHiddenPause(it) }
     )
 
     /** Whether page media is playing, as reported by the hook script. */

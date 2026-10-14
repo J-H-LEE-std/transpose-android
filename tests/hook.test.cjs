@@ -312,6 +312,7 @@ test('pause source is attributed when the page is hidden', () => {
   h.document.hidden = true;
   FakeMediaElement.prototype.pause.call(byPage);
   assert.ok(h.logs.some((l) => l.includes('media paused while page hidden by=page-script')), h.logs.join('\n'));
+  assert.equal(h.status().lastHiddenPause, 'page-script');
 
   const byBrowser = make();
   h.setMedia([byBrowser]);

@@ -117,6 +117,7 @@
     lastError: null,
     lastHref: location.href,
     playing: null,
+    lastHiddenPause: null,
     routeChanges: 0,
     silenceWarned: false,
     observer: null,
@@ -274,7 +275,11 @@
       reportPlayback(true);
     };
     const onStop = () => {
-      if (document.hidden) log('media paused while page hidden', 'by=' + pauseSource(media));
+      if (document.hidden) {
+        State.lastHiddenPause = pauseSource(media);
+        // The app turns this exact line into a diagnostic notification.
+        log('media paused while page hidden', 'by=' + State.lastHiddenPause);
+      }
       reportPlayback(anyMediaPlaying());
     };
     media.addEventListener('play', onPlay);
@@ -486,6 +491,7 @@
         lastError: State.lastError,
         routeChanges: State.routeChanges,
         playing: !!State.playing,
+        lastHiddenPause: State.lastHiddenPause,
         settings: Object.assign({}, State.settings)
       };
     }

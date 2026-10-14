@@ -156,7 +156,7 @@ When page media starts playing, the hook logs `[PocketTranspose] playback state 
 
 The app does **not** fake page visibility. Whether a site keeps playing when hidden is the site's decision: YouTube allows background playback on mobile web only for **YouTube Premium** members ([YouTube Help](https://support.google.com/youtube/answer/7356379)); other HTML5 media normally keeps playing.
 
-Diagnosing with `adb logcat -s PocketTransposeJS` after pressing Home during playback:
+When media is paused while the app is in the background, the app also posts a **Playback diagnostics** notification naming the cause (no adb needed), and Status shows it as `lastHiddenPause`. With adb, `adb logcat -s PocketTransposeJS` after pressing Home during playback shows:
 
 | Log after going to background | Meaning |
 | --- | --- |
