@@ -17,18 +17,36 @@
   // ---------------------------------------------------------------------------
   // Pitch shifter built only from native Web Audio nodes (written for this project).
   //
-  // Two delay taps; each tap's delay sweeps linearly through a 50 ms window at
+  // Two delay taps; each tap's delay sweeps linearly through an 80 ms window at
   // (1 - ratio) seconds per second, so its read head advances at `ratio` (pitch
-  // changes, duration does not). When a tap's sweep wraps, its sin^2 crossfade
-  // window is at zero; the two taps are half a period apart and their windows
-  // always sum to 1.
+  // changes, duration does not). The taps are half a sweep apart and take turns:
+  // a trapezoid window keeps exactly one tap audible most of the time and
+  // crossfades (sin^2, sums to 1) over a fixed 20 ms just before the active tap's
+  // delay wraps. Overlapping the taps all the time (the first design) summed two
+  // copies of the signal 25 ms apart and made the level swing several times a
+  // second (audible warble); short handovers cut that wobble 4-7x.
   //
   // The sweep and window curves come from one looping 4-channel AudioBuffer
   // (ramp/window for tap A, ramp/window for tap B) that drives DelayNode.delayTime
   // and GainNode.gain as audio-rate parameters. Everything runs on the audio
   // rendering thread: no AudioWorklet module (blocked by YouTube's CSP
   // 'strict-dynamic') and no ScriptProcessorNode (main-thread jank = crackle).
-  const PITCH_WINDOW_SECONDS = 0.05;
+  const PITCH_WINDOW_SECONDS = 0.08;
+  const PITCH_FADE_SECONDS = 0.02;
+
+  // Trapezoid tap window over the delay position a in [0, 1): fade in on [0, f],
+  // full on [f, 0.5], fade out on [0.5, 0.5 + f], silent until the wrap at 1.
+  // w(a) + w(a + 0.5) = 1 for every a, and w = 0 where the delay jumps.
+  function tapWindow(a, f) {
+    const rise = (x) => {
+      const s = Math.sin((Math.PI / 2) * x);
+      return s * s;
+    };
+    if (a < f) return rise(a / f);
+    if (a < 0.5) return 1;
+    if (a < 0.5 + f) return 1 - rise((a - 0.5) / f);
+    return 0;
+  }
 
   function createNativePitchShifter(ctx) {
     const W = PITCH_WINDOW_SECONDS;
@@ -37,7 +55,8 @@
     const output = ctx.createGain();
     const splitter = ctx.createChannelSplitter(4);
 
-    function buildCurves(falling) {
+    // falling: pitch up (delay shrinking); rising: pitch down (delay growing).
+    function buildCurves(falling, fadeFraction) {
       const buffer = ctx.createBuffer(4, frames, ctx.sampleRate);
       const ch = [0, 1, 2, 3].map((c) => buffer.getChannelData(c));
       for (let i = 0; i < frames; i++) {
@@ -47,17 +66,13 @@
           a = 1 - a;
           b = 1 - b;
         }
-        const sa = Math.sin(Math.PI * a);
-        const sb = Math.sin(Math.PI * b);
         ch[0][i] = a;
-        ch[1][i] = sa * sa;
+        ch[1][i] = tapWindow(a, fadeFraction);
         ch[2][i] = b;
-        ch[3][i] = sb * sb;
+        ch[3][i] = tapWindow(b, fadeFraction);
       }
       return buffer;
     }
-    // Pitch up = delay shrinking (falling ramp); pitch down = delay growing.
-    const curves = { up: buildCurves(true), down: buildCurves(false) };
 
     for (let tap = 0; tap < 2; tap++) {
       const delay = ctx.createDelay(W * 2);
@@ -75,27 +90,30 @@
     }
 
     let driver = null;
-    let up = null;
+    let driverKey = null;
     return {
       input,
       output,
       setSemitone(semitone) {
         const ratio = Math.pow(2, semitone / 12);
-        const wantUp = ratio > 1;
-        if (!driver || wantUp !== up) {
+        const sweep = Math.abs(1 - ratio);
+        // A fixed fade time means a larger window fraction for faster sweeps.
+        const fadeFraction = Math.min(0.25, Math.max(0.02, (PITCH_FADE_SECONDS * sweep) / W));
+        const key = (ratio > 1 ? 'up' : 'down') + ':' + fadeFraction.toFixed(4);
+        if (!driver || key !== driverKey) {
           if (driver) {
             try { driver.stop(); } catch (e) { /* already stopped */ }
             driver.disconnect();
           }
           driver = ctx.createBufferSource();
-          driver.buffer = wantUp ? curves.up : curves.down;
+          driver.buffer = buildCurves(ratio > 1, fadeFraction);
           driver.loop = true;
           driver.connect(splitter);
           driver.start();
-          up = wantUp;
+          driverKey = key;
         }
         // The curve buffer lasts W seconds, so this rate gives a sweep of |1 - ratio| s/s.
-        driver.playbackRate.value = Math.abs(1 - ratio);
+        driver.playbackRate.value = sweep;
       }
     };
   }

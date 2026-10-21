@@ -205,21 +205,30 @@ test('pitch uses native nodes, is clamped to +/-12, and drives the sweep rate', 
   assert.equal(h.status().settings.pitchSemitone, -12);
 });
 
-test('pitch curves: ramps sweep 0..1 in the right direction and windows sum to 1', () => {
+test('pitch curves: ramps sweep 0..1, windows sum to 1, one tap at a time', () => {
   const h = load(HOOK);
   h.setMedia([fakeMedia()]);
   h.scan();
   const ctx = FakeAudioContext.last;
-  for (const [semitone, falling] of [[3, true], [-3, false]]) {
+  for (const [semitone, falling] of [[3, true], [-3, false], [12, true]]) {
     h.api().setPitchSemitone(semitone);
     const buffer = ctx.bufferSources.at(-1).buffer;
     const [rampA, windowA, rampB, windowB] = [0, 1, 2, 3].map((c) => buffer.getChannelData(c));
-    assert.equal(buffer.length, Math.round(0.05 * ctx.sampleRate));
+    assert.equal(buffer.length, Math.round(0.08 * ctx.sampleRate));
     assert.equal(rampA[10] > rampA[100], falling);
+    let overlap = 0;
     for (let i = 0; i < buffer.length; i++) {
       assert.ok(rampA[i] >= 0 && rampA[i] <= 1 && rampB[i] >= 0 && rampB[i] <= 1);
       assert.ok(Math.abs(windowA[i] + windowB[i] - 1) < 1e-6);
+      // Silent where the delay wraps (ramp near 0 or 1).
+      if (rampA[i] < 1e-3 || rampA[i] > 1 - 1e-3) assert.ok(windowA[i] < 1e-3);
+      if (windowA[i] > 0.01 && windowB[i] > 0.01) overlap++;
     }
+    // Handovers last 20 ms per tap: overlap = 2 x 20 ms x sweep rate of the 80 ms window,
+    // clamped to [0.02, 0.25] of the window per fade.
+    const sweep = Math.abs(1 - Math.pow(2, semitone / 12));
+    const fade = Math.min(0.25, Math.max(0.02, (0.02 * sweep) / 0.08));
+    assert.ok(overlap / buffer.length <= 2 * fade + 0.01, `overlap ${overlap / buffer.length} vs ${2 * fade}`);
   }
 });
 
