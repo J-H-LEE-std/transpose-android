@@ -215,7 +215,7 @@ If media is paused while the app is in the background, Status shows the cause as
 ## Known limitations / risks
 
 - **YouTube CORS / MSE silence**: `createMediaElementSource()` may succeed while the output is silent. The analyser-based warning makes this visible, but it cannot be fixed from the page side (bypassing it is out of scope).
-- The pitch shifter is a simple time-domain design (≈50 ms window): fine for listening/practice, with some "chorus"-like artefacts on large shifts and ~25 ms of added latency. A higher-quality algorithm would need a permissively-licensed library or more DSP work (see license policy).
+- The pitch shifter is a simple time-domain design (80 ms window, 20 ms handovers between two delay taps), with about 20–30 ms of added latency. In v0.1.0 the taps overlapped all the time, which made the level swing audibly (warble). Since then only one tap is heard between short handovers: in offline Chromium measurements over −12…+12 semitones, level wobble dropped 4–7× (relative RMS fluctuation 0.15–0.22 → 0.025–0.055), and perceived pitch error dropped from 6–59 cents to ≤0.01 cents for −5…+7 (≤16 cents at ±12). Each handover is still a small phase jump, so very large shifts sound slightly grainy. A phase-vocoder/WSOLA-quality shifter would need script on the audio thread, which YouTube's CSP blocks for AudioWorklet.
 
 ### Why not AudioWorklet
 
