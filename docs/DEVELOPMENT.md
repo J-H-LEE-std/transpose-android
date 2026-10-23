@@ -89,7 +89,7 @@ Releases are built and published by `.github/workflows/release.yml` when a tag `
 2. runs the JS tests
 3. builds a release APK signed with the keystore from repository secrets; `assembleRelease` also runs the license gate and `lintVitalRelease`
 4. verifies the signature
-5. creates the GitHub Release with the APK, its SHA-256 and the license report
+5. creates the GitHub Release with the APK, its SHA-256, the project `LICENSE` and the third-party license report
 
 Release notes come from `docs/releases/<tag>.md`. Without signing secrets the workflow fails rather than publish an unsigned APK.
 
