@@ -62,6 +62,7 @@ jobs:
           mkdir dist
           cp "$apk" "dist/PocketTranspose-$GITHUB_REF_NAME.apk"
           cp app/build/reports/third-party-licenses/third-party-licenses.md dist/third-party-licenses.md
+          cp LICENSE dist/LICENSE.txt
           (cd dist && sha256sum "PocketTranspose-$GITHUB_REF_NAME.apk" > "PocketTranspose-$GITHUB_REF_NAME.apk.sha256")
           rm -f "$RUNNER_TEMP/release.jks"
 
