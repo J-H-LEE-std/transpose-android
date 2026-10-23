@@ -1,0 +1,4 @@
+<resources>
+    <string name="step_down" translatable="false">−</string>
+    <string name="step_up" translatable="false">+</string>
+</resources>
