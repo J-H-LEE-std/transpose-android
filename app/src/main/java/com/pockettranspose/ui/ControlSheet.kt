@@ -17,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import com.pockettranspose.settings.AudioControl
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -45,6 +46,7 @@ class ControlSheet(
         fun onTestPage()
         fun onReinject()
         fun onStatus()
+        fun onLicenses()
     }
 
     private val header: LinearLayout
@@ -91,6 +93,15 @@ class ControlSheet(
     fun expand() = settle(true)
 
     fun collapse() = settle(false)
+
+    /**
+     * Steps one value by one increment, exactly like its -/+ button (same clamps, and
+     * the change is reported through [Actions] like a tap). Used by the notification.
+     */
+    fun step(control: AudioControl, direction: Int) {
+        val row = rows[control.ordinal]
+        row.nudge(if (direction < 0) -row.stepSize else row.stepSize)
+    }
 
     /** Shows values loaded from elsewhere (per-video settings) without echoing them back. */
     fun setValues(pitchSemitone: Int, speedPercent: Int, gainPercent: Int) {
@@ -214,7 +225,11 @@ class ControlSheet(
             actions.onIdentifyAsChrome(it)
         })
 
-        addView(buttonRow("Reset" to { rows.forEach { it.reset() } }, "Status" to { actions.onStatus() }))
+        addView(buttonRow(
+            "Reset" to { rows.forEach { it.reset() } },
+            "Status" to { actions.onStatus() },
+            "Licenses" to { actions.onLicenses() }
+        ))
         addView(buttonRow(
             "YouTube" to { actions.onYouTube() },
             "Test page" to { actions.onTestPage() },
@@ -243,7 +258,7 @@ class ControlSheet(
         // Not named min/max: inside SeekBar.apply {} those would resolve to SeekBar.min/max.
         private val minValue: Int,
         private val maxValue: Int,
-        private val step: Int,
+        val stepSize: Int,
         private val default: Int,
         private val format: (Int) -> String,
         private val onChanged: (Int) -> Unit
@@ -279,9 +294,9 @@ class ControlSheet(
             addView(LinearLayout(context).apply {
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                addView(roundButton("−") { nudge(-step) }, LayoutParams(dp(48), dp(48)))
+                addView(roundButton("−") { nudge(-stepSize) }, LayoutParams(dp(48), dp(48)))
                 addView(seekBar, LayoutParams(0, dp(48), 1f))
-                addView(roundButton("+") { nudge(step) }, LayoutParams(dp(48), dp(48)))
+                addView(roundButton("+") { nudge(stepSize) }, LayoutParams(dp(48), dp(48)))
             })
             valueText.setOnLongClickListener {
                 reset()
@@ -289,10 +304,10 @@ class ControlSheet(
             }
         }
 
-        private fun nudge(delta: Int) {
+        fun nudge(delta: Int) {
             // Snap to the step grid so repeated taps land on round values.
             val current = seekBar.progress + minValue
-            val snapped = ((current + delta).toFloat() / step).roundToInt() * step
+            val snapped = ((current + delta).toFloat() / stepSize).roundToInt() * stepSize
             seekBar.progress = snapped.coerceIn(minValue, maxValue) - minValue
         }
 

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Playback notification controls (collapsed: key and speed). RemoteViews-safe views only; the
+     system notification text styles keep it readable in light and dark mode. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <TextView
+        android:id="@+id/pitch_value"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:maxLines="1"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
+
+    <TextView
+        android:id="@+id/pitch_minus"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:gravity="center"
+        android:text="@string/step_down"
+        android:textSize="20sp"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
+
+    <TextView
+        android:id="@+id/pitch_plus"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:gravity="center"
+        android:text="@string/step_up"
+        android:textSize="20sp"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
+
+
+    <TextView
+        android:id="@+id/speed_value"
+        android:layout_width="0dp"
+        android:layout_marginStart="12dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:maxLines="1"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
+
+    <TextView
+        android:id="@+id/speed_minus"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:gravity="center"
+        android:text="@string/step_down"
+        android:textSize="20sp"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
+
+    <TextView
+        android:id="@+id/speed_plus"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:gravity="center"
+        android:text="@string/step_up"
+        android:textSize="20sp"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
+
+</LinearLayout>

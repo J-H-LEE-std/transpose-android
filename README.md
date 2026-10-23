@@ -14,6 +14,7 @@ PocketTranspose opens the YouTube mobile site (or any web page with audio or vid
 - **Remembers your settings per video:** open a video again and its key, speed and volume come back
 - **Background playback:** keeps playing with the app in the background or the screen off, for YouTube Premium members (see below)
 - A swipe-up control panel with −/+ buttons that's easy to use one-handed
+- **Adjust from the notification:** −/+ for key and speed (and volume when expanded), without opening the app
 
 ## Requirements
 
@@ -58,11 +59,18 @@ You can also type another web address in the bar at the top to adjust the sound 
 | Test page | A built-in page that plays a short tone. Use it to check that the controls work. |
 | Reinject | Reconnects the controls if they stop affecting the sound. |
 | Status | Shows technical details, useful if you report a problem. |
+| Licenses | Shows the open source licenses of PocketTranspose and the components it includes. |
 | Probe only | A developer diagnostic. Leave it off. |
 
 ## Background playback
 
 When something starts playing, PocketTranspose asks (once) for permission to show notifications. While it plays, a **"PocketTranspose is playing"** notification lets you pause or stop.
+
+The notification is also a small remote control:
+- **Collapsed:** −/+ for the key and the speed
+- **Expanded** (pull it down): −/+ for key, speed and volume
+
+Changes made there appear in the app's panel right away and are saved for the current video, just like the panel's own buttons.
 
 - **YouTube:** YouTube decides whether a video keeps playing in the background, exactly as in a mobile browser. With **YouTube Premium** it keeps playing; without Premium it pauses when you leave the app. PocketTranspose doesn't get around this.
 - **Other sites:** most audio and video simply keep playing.
