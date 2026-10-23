@@ -62,7 +62,7 @@ You can also type another web address in the bar at the top to adjust the sound 
 
 ## Background playback
 
-When something starts playing, PocketTranspose asks (once) for permission to show notifications. While it plays, a **"PocketTranspose is playing"** notification lets you pause or stop.
+When you first open it, PocketTranspose asks for permission to show notifications. While it plays, a **"PocketTranspose is playing"** notification lets you pause or stop.
 
 - **YouTube:** YouTube decides whether a video keeps playing in the background, exactly as in a mobile browser. With **YouTube Premium** it keeps playing; without Premium it pauses when you leave the app. PocketTranspose doesn't get around this.
 - **Other sites:** most audio and video simply keep playing.
