@@ -1,8 +1,8 @@
-# PocketTranspose
+# PocketTranspose: developer guide
 
-PocketTranspose is an Android Kotlin WebView proof-of-concept for testing whether audio from a YouTube or HTML5 `<video>/<audio>` element can be connected to a Web Audio API graph inside an app-controlled WebView, and then adjusted (gain, speed, pitch) from native Android controls — similar in spirit to the Transpose Chrome extension.
+Technical documentation for building, testing and releasing PocketTranspose. For what the app does and how to use it, see the [README](../README.md) ([한국어](../README.ko.md)).
 
-The primary question this PoC answers: **does `AudioContext.createMediaElementSource(video)` work (and stay audible) for YouTube inside Android WebView?** If YouTube fails but a plain HTML5 media page succeeds, the first PoC still counts as a success.
+PocketTranspose started as a proof-of-concept that answered one question: **does `AudioContext.createMediaElementSource(video)` work, and stay audible, for YouTube inside an Android WebView?** It does. The app now injects a script into its own WebView, routes the page's `<video>/<audio>` through a Web Audio graph, and controls gain, speed and pitch from native Android UI, similar in spirit to the Transpose Chrome extension.
 
 ## Architecture
 
