@@ -183,6 +183,18 @@ Results below are from the cloud build environment. The debug APK builds, but **
 | Pitch | Audible pitch change, no crackle | Check `pitchEngine` / `pitchError` in Status; if it crackles, check whether it also crackles at Pitch 0 (bypass) |
 | YouTube transition | Re-scan on new video | Strengthen SPA event detection |
 
+## Notification controls
+
+`PlaybackService` builds its notification with `Notification.DecoratedCustomViewStyle` and two `RemoteViews` layouts:
+- `res/layout/notification_controls_small.xml`: key and speed
+- `res/layout/notification_controls_big.xml`: key, speed and volume
+
+Each −/+ is a `PendingIntent` to the service (`ACTION_ADJUST`, one request code per control and direction). The service forwards it to the activity, which calls `ControlSheet.step()`. That is the same row stepping as the sheet's own buttons, so the same clamps apply, the controller is updated and the per-video save is scheduled. The activity mirrors every value change back with `PlaybackService.updateValues()`. The layouts use only `RemoteViews`-supported views: `LinearLayout` and `TextView`, with the system notification text styles.
+
+## In-app licenses
+
+`LicensesActivity` (panel → Licenses) shows the project `LICENSE`, the bundled third-party components and the Apache-2.0 text. The `licenseAssets` task in `app/build.gradle.kts` copies `LICENSE`, `app/licenses/Apache-2.0.txt` (the SPDX text) and the `checkThirdPartyLicenses` report into generated assets on every build, via `androidComponents` `addGeneratedSourceDirectory`. The screen therefore always matches what is bundled.
+
 ## Per-video settings
 
 Transpose, speed and gain are remembered per YouTube video in a local SQLite database (`settings/VideoSettingsStore.kt`, platform `SQLiteOpenHelper`, no extra dependency):
