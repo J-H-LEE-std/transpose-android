@@ -106,7 +106,8 @@ function load(code, windowExtras = {}, documentOverride = null) {
     },
     location: { href: 'https://m.youtube.com/', origin: 'https://m.youtube.com' },
     history: { pushState() {}, replaceState() {} },
-    console: { log: (...args) => logs.push(args.join(' ')) },
+    // Like older Android WebViews, keep only the first argument (all the app ever sees).
+    console: { log: (...args) => logs.push(String(args[0])) },
     MutationObserver: class { observe() {} },
     Event: class { constructor(type) { this.type = type; } },
     setTimeout: (fn) => { timeouts.push(fn); return timeouts.length; },
