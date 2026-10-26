@@ -27,6 +27,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".LicensesActivity"
+            android:exported="false"
+            android:label="Open source licenses" />
+
         <service
             android:name=".playback.PlaybackService"
             android:exported="false"

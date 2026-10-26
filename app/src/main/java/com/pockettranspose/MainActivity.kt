@@ -3,6 +3,7 @@ package com.pockettranspose
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Rect
@@ -25,6 +26,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.pockettranspose.playback.PlaybackService
 import com.pockettranspose.script.InjectedScriptProvider
+import com.pockettranspose.settings.AudioValues
 import com.pockettranspose.settings.VideoSettingsStore
 import com.pockettranspose.settings.YouTubeVideoId
 import com.pockettranspose.script.InjectionMode
@@ -68,6 +70,8 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
         PlaybackService.pauseMediaHandler = { controller.pauseMedia() }
         layOutEdgeToEdge()
         setContentView(buildLayout())
+        // Notification -/+ step the same rows as the sheet's own buttons.
+        PlaybackService.adjustHandler = { control, direction -> sheet.step(control, direction) }
         if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) controller.loadYouTube()
     }
 
@@ -109,6 +113,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
         flushPendingSave()
         settingsStore.close()
         PlaybackService.pauseMediaHandler = null
+        PlaybackService.adjustHandler = null
         PlaybackService.stop(this)
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
@@ -138,6 +143,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
             if (generation != loadGeneration || videoId != currentVideoId) return@load
             val values = saved ?: VideoSettingsStore.VideoSettings.DEFAULT
             controller.applyAudioSettings(values.pitchSemitone, values.playbackRate, values.gain)
+            publishValues()
             sheet.setValues(
                 values.pitchSemitone,
                 (values.playbackRate * 100).roundToInt(),
@@ -179,16 +185,17 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     override fun onPlaybackStateChanged(playing: Boolean) {
         if (playing) {
             requestNotificationPermissionOnce()
-            PlaybackService.onPlaying(this, playbackSummary())
+            PlaybackService.onPlaying(this)
         } else {
             PlaybackService.onPaused()
             if (!isInForeground) controller.releaseBackgroundHold()
         }
     }
 
-    private fun playbackSummary(): String {
+    /** Mirrors the current values into the playback notification's controls. */
+    private fun publishValues() {
         val s = controller.settings
-        return "Transpose %+d · %.2fx · gain %.2f".format(Locale.US, s.pitchSemitone, s.playbackRate, s.gain)
+        PlaybackService.updateValues(AudioValues(s.pitchSemitone, s.playbackRate, s.gain))
     }
 
     // Android 13+: the playback notification needs POST_NOTIFICATIONS. Playback works
@@ -209,16 +216,19 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
 
     override fun onPitch(semitone: Int) {
         controller.setPitchSemitone(semitone)
+        publishValues()
         onUserChangedAudioSettings()
     }
 
     override fun onSpeed(rate: Float) {
         controller.setPlaybackRate(rate)
+        publishValues()
         onUserChangedAudioSettings()
     }
 
     override fun onGain(gain: Float) {
         controller.setGain(gain)
+        publishValues()
         onUserChangedAudioSettings()
     }
     override fun onPreservesPitch(enabled: Boolean) = controller.setPreservesPitch(enabled)
@@ -230,6 +240,8 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     }
 
     private fun prefs() = getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    override fun onLicenses() = startActivity(Intent(this, LicensesActivity::class.java))
 
     override fun onYouTube() = controller.loadYouTube()
     override fun onTestPage() = controller.loadTestPage()
