@@ -148,8 +148,10 @@
     return typeof value === 'string' ? value.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>') : value;
   }
 
+  // One string argument: older WebViews (e.g. Android 8) pass only the first console.log
+  // argument to onConsoleMessage, which would hide the playback state lines from the app.
   function log(...args) {
-    console.log('[PocketTranspose]', ...args.map(redactUrls));
+    console.log(['[PocketTranspose]', ...args.map(redactUrls)].join(' '));
   }
 
   function safeError(error) {

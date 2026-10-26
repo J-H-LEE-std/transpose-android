@@ -10,10 +10,11 @@
   let lastMedia = null;
   let routeChanges = 0;
 
-  // Privacy: never log URLs.
+  // Privacy: never log URLs. One string argument, as in the hook (older WebViews forward
+  // only the first console.log argument).
   function log(...args) {
-    console.log('[PocketTranspose]', ...args.map((v) =>
-      typeof v === 'string' ? v.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>') : v));
+    console.log(['[PocketTranspose]', ...args.map((v) =>
+      typeof v === 'string' ? v.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>') : v)].join(' '));
   }
 
   // Never log full media URLs (privacy policy); only the scheme kind.

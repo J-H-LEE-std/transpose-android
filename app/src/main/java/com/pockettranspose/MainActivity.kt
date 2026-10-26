@@ -46,7 +46,6 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     private lateinit var fullscreenContainer: FrameLayout
     private lateinit var urlInput: EditText
     private lateinit var sheet: ControlSheet
-    private var notificationPermissionAsked = false
     private var isInForeground = false
     private lateinit var settingsStore: VideoSettingsStore
     private val handler = Handler(Looper.getMainLooper())
@@ -73,6 +72,7 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
         // Notification -/+ step the same rows as the sheet's own buttons.
         PlaybackService.adjustHandler = { control, direction -> sheet.step(control, direction) }
         if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) controller.loadYouTube()
+        if (savedInstanceState == null) requestNotificationPermission()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -184,7 +184,6 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
 
     override fun onPlaybackStateChanged(playing: Boolean) {
         if (playing) {
-            requestNotificationPermissionOnce()
             PlaybackService.onPlaying(this)
         } else {
             PlaybackService.onPaused()
@@ -199,10 +198,10 @@ class MainActivity : Activity(), TransposeWebViewController.Listener, ControlShe
     }
 
     // Android 13+: the playback notification needs POST_NOTIFICATIONS. Playback works
-    // without it; the notification just stays hidden. Ask once, on first playback.
-    private fun requestNotificationPermissionOnce() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || notificationPermissionAsked) return
-        notificationPermissionAsked = true
+    // without it; the notification just stays hidden. Ask at launch, so the prompt does not
+    // depend on playback being detected; the system stops showing it after repeated denials.
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
         }

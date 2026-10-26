@@ -64,7 +64,7 @@ You can also type another web address in the bar at the top to adjust the sound 
 
 ## Background playback
 
-When something starts playing, PocketTranspose asks (once) for permission to show notifications. While it plays, a **"PocketTranspose is playing"** notification lets you pause or stop.
+When you first open it, PocketTranspose asks for permission to show notifications. While it plays, a **"PocketTranspose is playing"** notification lets you pause or stop.
 
 The notification is also a small remote control:
 - **Collapsed:** −/+ for the key and the speed
